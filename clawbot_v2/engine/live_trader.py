@@ -9335,74 +9335,79 @@ class LiveTrader:
         return rows
 
     def _compute_calibration(self) -> dict:
-        """Brier Score calibration: ALL historical rounds + live proper bets in one pool.
+        """Brier Score over three data sources pooled together:
 
-        Data sources:
-          - hist_calib_samples: 5000+ Gamma resolved rounds, LLR→true_prob retrocomputed.
-            This is the BASE — calibrates the signal across ALL market conditions.
-          - resolved_samples: actual live bets. Only those with genuine true_prob
-            (saved at bet time, not the old entry-price proxy) are included in BS.
-            They UPDATE the pool as they accumulate.
+        1. hist_calib (5000 Gamma rounds, LLR→true_prob): baseline signal calibration.
+        2. Live historical bets (all resolved_samples): entry price used as true_prob proxy.
+           These represent real bot decisions — what the bot actually bet on.
+        3. Live proper bets (resolved_samples with true_prob saved from signal): highest
+           quality — the actual model output vs outcome. Weighted 3x vs others.
 
-        Both sources measure the same thing: (predicted_prob, outcome) pairs.
-        They are pooled together — hist is just the initial calibration data,
-        live bets add to it after each resolved round.
-
-        Brier Score = mean((predicted_prob - actual_outcome)^2).
-          perfect=0.0, random=0.25.
+        Brier Score = mean((predicted_prob - outcome)^2). Perfect=0.0, random=0.25.
         """
         live_all = [s for s in list(self._resolved_samples) if int(s.get("duration", 0) or 0) >= 15]
         hist     = list(self._hist_calib_samples)
 
-        # ── Pool all calibration samples together ────────────────────────────
-        bs_all = []
+        bs_hist_vals = []
+        bs_proxy_vals = []   # live bets using entry as proxy
+        bs_proper_vals = []  # live bets with real true_prob from signal
         wins_live = 0
         n_live_all = len(live_all)
 
-        # Hist samples — all have retrocomputed LLR→true_prob
+        # Source 1: hist_calib — retrocomputed LLR→true_prob for all 15m rounds
         for s in hist:
             tp = float(s.get("true_prob", 0.0) or 0.0)
             if tp < 0.01:
                 continue
             outcome = 1.0 if s.get("won") else 0.0
-            bs_all.append((tp - outcome) ** 2)
+            bs_hist_vals.append((tp - outcome) ** 2)
 
-        # Live bets — only include if true_prob was genuinely saved at bet time
-        # (not the old entry proxy). Detect: true_prob was stored as a signal output,
-        # so it differs meaningfully from the entry price.
+        # Source 2 + 3: live bets
         n_live_proper = 0
         for s in live_all:
             if s.get("won"):
                 wins_live += 1
             tp    = float(s.get("true_prob", 0.0) or 0.0)
             entry = float(s.get("entry", 0.0) or 0.0)
-            if tp < 0.01 or abs(tp - entry) < 0.002:
-                continue   # skip proxy entries (true_prob == entry ≈ old bets)
             outcome = 1.0 if s.get("won") else 0.0
-            bs_all.append((tp - outcome) ** 2)
-            n_live_proper += 1
 
-        n_total = len(bs_all)
-        n_hist  = len(hist)
+            if tp > 0.01 and abs(tp - entry) >= 0.002:
+                # Genuine true_prob saved from signal — highest quality
+                bs_proper_vals.append((tp - outcome) ** 2)
+                n_live_proper += 1
+            elif entry > 0.01:
+                # Use entry as proxy — real bot decision, but noisy prediction
+                tp_proxy = max(0.50, min(0.95, entry))
+                bs_proxy_vals.append((tp_proxy - outcome) ** 2)
 
-        if n_total < 10:
+        n_hist   = len(hist)
+        n_hist_v = len(bs_hist_vals)
+        n_proxy  = len(bs_proxy_vals)
+        n_proper = len(bs_proper_vals)
+
+        if n_hist_v + n_proxy + n_proper < 10:
             return {"score": 0, "n": n_live_all, "n_hist": n_hist,
-                    "n_proper": n_live_proper, "wr": 0.0, "brier": None}
+                    "n_proper": n_live_proper, "wr": 0.0, "brier": None, "n_calib": 0}
 
-        brier   = sum(bs_all) / n_total
+        # Weighted pool: proper live 3x, proxy live 1x, hist 1x
+        w_sum  = (n_hist_v + n_proxy) + n_proper * 3
+        brier  = (
+            sum(bs_hist_vals) + sum(bs_proxy_vals) + sum(bs_proper_vals) * 3
+        ) / w_sum if w_sum > 0 else 0.25
+
+        n_calib = n_hist_v + n_proxy + n_proper
         wr_base = wins_live / n_live_all if n_live_all > 0 else 0.5
 
         brier_score = max(0.0, min(1.0, (0.25 - brier) / 0.25))
         wr_score    = max(0.0, min(1.0, (wr_base - 0.50) / 0.35))
-        # confidence: saturates at ~5000 samples (one hist batch is already saturated)
-        n_eff   = min(1.0, n_total / 500.0)
-        score   = int((brier_score * 0.65 + wr_score * 0.20 + n_eff * 0.15) * 100)
+        n_eff       = min(1.0, n_calib / 500.0)
+        score       = int((brier_score * 0.60 + wr_score * 0.25 + n_eff * 0.15) * 100)
         return {
             "score": score, "n": n_live_all, "n_hist": n_hist,
-            "n_proper": n_live_proper,
+            "n_proper": n_live_proper, "n_proxy": n_proxy,
             "wr": round(wr_base * 100, 1),
             "brier": round(brier, 4),
-            "n_calib": n_total,
+            "n_calib": n_calib,
         }
 
     def _dashboard_data(self) -> dict:
@@ -10097,7 +10102,7 @@ function renderMetrics(d){
     ['Open Stake','$'+fmt(d.open_stake),'Mark <b>$'+fmt(d.open_mark)+'</b>'],
   ].map(([l,v,s])=>
     `<div class="mi"><div class="mi-l">${l}</div><div class="mi-v">${v}</div><div class="mi-s">${s}</div></div>`
-  ).join('')+`<div class="mi"><div class="mi-l">Calibration</div><div class="mi-v"><span class="${cc}">${cs}%</span></div><div class="mi-s">${calBar}<span style="font-size:.7em;opacity:.6">${cal.n_calib||0} samples (${cal.n_hist||0} hist+${cal.n_proper||0} live) · WR ${cal.wr}% · BS ${cal.brier!=null?cal.brier:'?'}</span></div></div>`;
+  ).join('')+`<div class="mi"><div class="mi-l">Calibration</div><div class="mi-v"><span class="${cc}">${cs}%</span></div><div class="mi-s">${calBar}<span style="font-size:.7em;opacity:.6">${cal.n_calib||0} samples (${cal.n_hist||0}H+${cal.n_proxy||0}P+${cal.n_proper||0}L) · WR ${cal.wr}% · BS ${cal.brier!=null?cal.brier:'?'}</span></div></div>`;
 }
 
 function drawSparkline(canvas,wp,openP,lead){
