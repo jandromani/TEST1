@@ -323,8 +323,9 @@ async def _score_market(self, m: dict) -> dict | None:
                         f"{Y}[SKIP] {asset} {duration}m missing fresh CLOB WS book "
                         f"(ws_age={ws_age_pref:.0f}ms pm_age={pm_age_ms:.0f}ms){RS}"
                     )
-                self._skip_tick("book_ws_missing")
-                return None
+                if not NO_GATES_MODE:
+                    self._skip_tick("book_ws_missing")
+                    return None
     if REQUIRE_ORDERBOOK_WS and STRICT_REQUIRE_FRESH_BOOK_WS and ws_book_strict is None:
         allow_strict_rest = (
             isinstance(ws_book_now, dict)
@@ -336,8 +337,9 @@ async def _score_market(self, m: dict) -> dict | None:
                 print(
                     f"{Y}[SKIP] {asset} {duration}m strict WS required (no fresh strict book){RS}"
                 )
-            self._skip_tick("book_ws_strict_required")
-            return None
+            if not NO_GATES_MODE:
+                self._skip_tick("book_ws_strict_required")
+                return None
 
     # Additional instant signals from Binance cache (zero latency)
     dw_ob     = self._ob_depth_weighted(asset)
@@ -1851,7 +1853,7 @@ async def _score_market(self, m: dict) -> dict | None:
             and payout_mult >= LOWCENT_NEW_MIN_PAYOUT
             and cl_agree
         )
-        if not lowcent_new_ok:
+        if (not lowcent_new_ok) and (not NO_GATES_MODE):
             if self._noisy_log_enabled(f"skip-lowcent-weak-new:{asset}:{cid}", LOG_SKIP_EVERY_SEC):
                 print(
                     f"{Y}[SKIP]{RS} {asset} {duration}m low-cent new entry weak "
