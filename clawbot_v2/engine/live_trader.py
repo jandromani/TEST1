@@ -7408,6 +7408,9 @@ class LiveTrader:
         else:
             min_payout = max(1.55, min(base_payout + payout_upshift_cap, min_payout_raw))
         min_ev = max(0.005, base_ev + (0.015 * tightness))
+        # Keep 15m EV floor bounded to avoid execution paralysis after rough windows.
+        if duration >= 15:
+            min_ev = min(min_ev, 0.015)
         max_entry_hard = max(0.33, min(0.80, hard_cap - (0.06 * tightness)))
         # In favorable regime, allow slightly wider executable entry band.
         if (
@@ -7434,9 +7437,13 @@ class LiveTrader:
         avg_slip_bps = float(r.get("slip_bps", 0.0) or 0.0) / max(1, fills)
         # Convert bps into expected probability-cost space.
         slip_cost = max(0.0, min(0.03, (avg_slip_bps / 10000.0) * max(0.05, float(entry or 0.0))))
-        fill_ratio = fills / max(1, outcomes) if outcomes > 0 else min(1.0, fills / 12.0)
+        # If fills are absent (e.g. after slip reset), don't assume zero reliability.
+        if fills == 0:
+            fill_ratio = 0.90
+        else:
+            fill_ratio = fills / max(1, outcomes) if outcomes > 0 else min(1.0, fills / 12.0)
         # Penalize low historical fill reliability on this bucket.
-        nofill_penalty = max(0.0, min(0.02, (1.0 - max(0.0, min(1.0, fill_ratio))) * 0.02))
+        nofill_penalty = max(0.0, min(0.01, (1.0 - max(0.0, min(1.0, fill_ratio))) * 0.01))
         return slip_cost, nofill_penalty, max(0.0, min(1.0, fill_ratio))
 
     def _prob_shrink_factor(self) -> float:
