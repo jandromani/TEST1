@@ -3288,6 +3288,156 @@ class LiveTrader:
         corr = _btc_lag_corr.get(asset, 0.77)
         return float(norm.cdf(btc_lag_move / vol_t * corr))
 
+    @staticmethod
+    def _metrics_norm_side(v: str) -> str:
+        s = str(v or "").strip().upper()
+        if s in {"UP", "YES", "LONG"}:
+            return "Up"
+        if s in {"DOWN", "NO", "SHORT"}:
+            return "Down"
+        return ""
+
+    @staticmethod
+    def _metrics_norm_result(v: str) -> str:
+        s = str(v or "").strip().upper()
+        if s in {"WIN", "WON", "SUCCESS"}:
+            return "WIN"
+        if s in {"LOSS", "LOSE", "LOST", "FAIL"}:
+            return "LOSS"
+        return ""
+
+    @staticmethod
+    def _metrics_round_key_valid(rk: str) -> bool:
+        s = str(rk or "").strip()
+        if not s:
+            return False
+        # Canonical format: ASSET-15m-YYYYMMDDTHHMMSSZ-YYYYMMDDTHHMMSSZ
+        if re.match(r"^[A-Z0-9]+-(5m|15m)-\d{8}T\d{6}Z-\d{8}T\d{6}Z$", s):
+            return True
+        # Legacy format still accepted if duration is valid (never 0m).
+        if re.match(r"^[A-Z0-9]+-(5m|15m)-cid0x[0-9a-fA-F]+", s):
+            return True
+        return False
+
+    def _metrics_prepare_resolve_record(self, rec: dict):
+        """Return sanitized DB row tuple for canonical RESOLVE rows, else None."""
+        ev = str(rec.get("event", "") or "").strip()
+        if ev != "RESOLVE":
+            # Keep JSONL log for auxiliary events, but DB must remain canonical.
+            return None
+        cid = str(rec.get("condition_id", "") or "").strip()
+        side = self._metrics_norm_side(rec.get("side", ""))
+        result = self._metrics_norm_result(rec.get("result", ""))
+        rk = str(rec.get("round_key", "") or "").strip()
+        if not cid or not side or not result or not self._metrics_round_key_valid(rk):
+            return None
+        asset = str(rec.get("asset", "") or "").strip().upper()
+        if not asset:
+            try:
+                asset = rk.split("-", 1)[0].strip().upper()
+            except Exception:
+                asset = ""
+        if not asset:
+            return None
+        try:
+            duration = int(rec.get("duration", 0) or 0)
+        except Exception:
+            duration = 0
+        if duration not in (5, 15):
+            duration = 5 if "-5m-" in rk else 15 if "-15m-" in rk else 0
+        if duration not in (5, 15):
+            return None
+        try:
+            score = int(rec.get("score", 0) or 0)
+        except Exception:
+            score = 0
+        try:
+            entry = float(rec.get("entry_price", 0.0) or 0.0)
+        except Exception:
+            entry = 0.0
+        if not (0.0 < entry <= 1.0):
+            return None
+        try:
+            pnl = float(rec.get("pnl", 0.0) or 0.0)
+        except Exception:
+            pnl = 0.0
+        ts = str(rec.get("ts", "") or datetime.now(timezone.utc).isoformat())
+        src = str(rec.get("open_price_source", "") or "").strip()
+        try:
+            cl_age = float(rec.get("chainlink_age_s", 0.0) or 0.0)
+        except Exception:
+            cl_age = 0.0
+        return (ts, ev, cid, asset, side, duration, score, entry, pnl, result, rk, src, cl_age)
+
+    def _metrics_db_repair(self):
+        """Normalize and purge invalid resolve rows in-place."""
+        if not self._metrics_db_ready:
+            return
+        try:
+            conn = sqlite3.connect(METRICS_DB_FILE, timeout=8.0)
+            try:
+                cur = conn.cursor()
+                cur.execute(
+                    """
+                    UPDATE resolve_metrics
+                    SET side = CASE
+                        WHEN UPPER(TRIM(side)) IN ('UP','YES','LONG') THEN 'Up'
+                        WHEN UPPER(TRIM(side)) IN ('DOWN','NO','SHORT') THEN 'Down'
+                        ELSE side
+                    END
+                    """
+                )
+                cur.execute(
+                    """
+                    UPDATE resolve_metrics
+                    SET result = CASE
+                        WHEN UPPER(TRIM(result)) IN ('WIN','WON','SUCCESS') THEN 'WIN'
+                        WHEN UPPER(TRIM(result)) IN ('LOSS','LOSE','LOST','FAIL') THEN 'LOSS'
+                        ELSE result
+                    END
+                    """
+                )
+                cur.execute("DELETE FROM resolve_metrics WHERE event != 'RESOLVE'")
+                cur.execute("DELETE FROM resolve_metrics WHERE condition_id IS NULL OR TRIM(condition_id) = ''")
+                cur.execute("DELETE FROM resolve_metrics WHERE asset IS NULL OR TRIM(asset) = ''")
+                cur.execute("DELETE FROM resolve_metrics WHERE side NOT IN ('Up','Down')")
+                cur.execute("DELETE FROM resolve_metrics WHERE result NOT IN ('WIN','LOSS')")
+                cur.execute("DELETE FROM resolve_metrics WHERE duration NOT IN (5,15)")
+                cur.execute("DELETE FROM resolve_metrics WHERE entry_price IS NULL OR entry_price <= 0 OR entry_price > 1")
+                cur.execute("DELETE FROM resolve_metrics WHERE round_key IS NULL OR TRIM(round_key) = ''")
+                cur.execute("DELETE FROM resolve_metrics WHERE round_key LIKE '%-0m-%'")
+                cur.execute(
+                    """
+                    DELETE FROM resolve_metrics
+                    WHERE id IN (
+                        SELECT id FROM (
+                            SELECT id,
+                                   ROW_NUMBER() OVER (
+                                       PARTITION BY condition_id, side, round_key
+                                       ORDER BY id DESC
+                                   ) AS rn
+                            FROM resolve_metrics
+                        ) d
+                        WHERE d.rn > 1
+                    )
+                    """
+                )
+                cur.execute(
+                    "CREATE INDEX IF NOT EXISTS idx_resolve_round_side ON resolve_metrics(round_key, side)"
+                )
+                cur.execute(
+                    "CREATE INDEX IF NOT EXISTS idx_resolve_asset_duration ON resolve_metrics(asset, duration)"
+                )
+                conn.commit()
+                try:
+                    conn.execute("PRAGMA optimize")
+                except Exception:
+                    pass
+            finally:
+                conn.close()
+        except Exception:
+            pass
+
     def _init_metrics_db(self):
         try:
             conn = sqlite3.connect(METRICS_DB_FILE, timeout=5.0)
@@ -3327,7 +3477,9 @@ class LiveTrader:
             finally:
                 conn.close()
             self._metrics_db_ready = True
+            self._metrics_db_repair()
             self._metrics_db_backfill_from_jsonl()
+            self._metrics_db_repair()
         except Exception:
             self._metrics_db_ready = False
 
@@ -3345,13 +3497,15 @@ class LiveTrader:
                 with open(METRICS_FILE, encoding="utf-8") as f:
                     lines = f.readlines()[-max_lines:]
                 ins = 0
+                skip = 0
                 for ln in lines:
                     try:
                         row = json.loads(ln)
                     except Exception:
                         continue
-                    ev = str(row.get("event", "") or "")
-                    if not ev.startswith("RESOLVE"):
+                    db_row = self._metrics_prepare_resolve_record(row)
+                    if not db_row:
+                        skip += 1
                         continue
                     cur.execute(
                         """
@@ -3359,26 +3513,15 @@ class LiveTrader:
                         (ts,event,condition_id,asset,side,duration,score,entry_price,pnl,result,round_key,open_price_source,chainlink_age_s)
                         VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?)
                         """,
-                        (
-                            str(row.get("ts", "") or datetime.now(timezone.utc).isoformat()),
-                            ev,
-                            str(row.get("condition_id", "") or ""),
-                            str(row.get("asset", "") or ""),
-                            str(row.get("side", "") or ""),
-                            int(row.get("duration", 0) or 0),
-                            int(row.get("score", 0) or 0),
-                            float(row.get("entry_price", 0.0) or 0.0),
-                            float(row.get("pnl", 0.0) or 0.0),
-                            str(row.get("result", "") or ""),
-                            str(row.get("round_key", "") or ""),
-                            str(row.get("open_price_source", "") or ""),
-                            float(row.get("chainlink_age_s", 0.0) or 0.0),
-                        ),
+                        db_row,
                     )
                     ins += 1
                 conn.commit()
                 if ins > 0:
-                    print(f"{B}[BOOT]{RS} imported {ins} RESOLVE rows into metrics sqlite")
+                    print(
+                        f"{B}[BOOT]{RS} imported {ins} clean RESOLVE rows into metrics sqlite "
+                        f"(skipped={skip})"
+                    )
             finally:
                 conn.close()
         except Exception:
@@ -3388,8 +3531,8 @@ class LiveTrader:
         if not self._metrics_db_ready:
             return
         try:
-            ev = str(rec.get("event", "") or "")
-            if not ev.startswith("RESOLVE"):
+            db_row = self._metrics_prepare_resolve_record(rec)
+            if not db_row:
                 return
             conn = sqlite3.connect(METRICS_DB_FILE, timeout=3.0)
             try:
@@ -3399,21 +3542,7 @@ class LiveTrader:
                     (ts,event,condition_id,asset,side,duration,score,entry_price,pnl,result,round_key,open_price_source,chainlink_age_s)
                     VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?)
                     """,
-                    (
-                        str(rec.get("ts", "") or datetime.now(timezone.utc).isoformat()),
-                        ev,
-                        str(rec.get("condition_id", "") or ""),
-                        str(rec.get("asset", "") or ""),
-                        str(rec.get("side", "") or ""),
-                        int(rec.get("duration", 0) or 0),
-                        int(rec.get("score", 0) or 0),
-                        float(rec.get("entry_price", 0.0) or 0.0),
-                        float(rec.get("pnl", 0.0) or 0.0),
-                        str(rec.get("result", "") or ""),
-                        str(rec.get("round_key", "") or ""),
-                        str(rec.get("open_price_source", "") or ""),
-                        float(rec.get("chainlink_age_s", 0.0) or 0.0),
-                    ),
+                    db_row,
                 )
                 conn.commit()
             finally:
@@ -9390,29 +9519,19 @@ class LiveTrader:
         return rows
 
     def _compute_calibration(self) -> dict:
-        """Brier Score over three data sources pooled together:
+        """Hybrid Brier calibration from historical + live outcomes.
 
-        1. hist_calib (5000 Gamma rounds, LLR→true_prob): baseline signal calibration.
-        2. Live historical bets (all resolved_samples): entry price used as true_prob proxy.
-           These represent real bot decisions — what the bot actually bet on.
-        3. Live proper bets (resolved_samples with true_prob saved from signal): highest
-           quality — the actual model output vs outcome. Weighted 3x vs others.
-
-        Brier Score = mean((predicted_prob - outcome)^2). Perfect=0.0, random=0.25.
+        1) Historical hist_calib (offline Gamma+Binance derived)
+        2) Live resolved bets with real true_prob (proper)
+        3) Live resolved bets without true_prob using entry proxy (proxy)
         """
         live_all = [s for s in list(self._resolved_samples) if int(s.get("duration", 0) or 0) >= 15]
-        hist     = list(self._hist_calib_samples)
-
+        hist = list(self._hist_calib_samples)
         bs_hist_vals = []
-        bs_proxy_vals = []   # live bets using entry as proxy
-        bs_proper_vals = []  # live bets with real true_prob from signal
-        wins_live = 0
-        n_live_all = len(live_all)
+        bs_proper_vals = []
+        bs_proxy_vals = []
 
-        # Source 1: hist_calib — evaluate only the strongest predicted side per round.
-        # hist_calib stores both sides for each round; using both would double-count
-        # and penalize the "opposite side" that the bot would never take.
-        # Keep only high-confidence picks to mirror real execution profile.
+        # Keep strongest predicted side per historical round.
         best_by_round = {}
         for s in hist:
             tp = float(s.get("true_prob", 0.0) or 0.0)
@@ -9427,51 +9546,65 @@ class LiveTrader:
             prev = best_by_round.get(k)
             if (prev is None) or (tp > float(prev.get("true_prob", 0.0) or 0.0)):
                 best_by_round[k] = s
+        hist_prob_min = float(os.environ.get("HIST_CALIB_PROB_MIN", "0.55") or 0.55)
         for s in best_by_round.values():
             tp = float(s.get("true_prob", 0.0) or 0.0)
-            if tp < 0.55:
+            if tp < hist_prob_min:
                 continue
             outcome = 1.0 if s.get("won") else 0.0
             bs_hist_vals.append((tp - outcome) ** 2)
 
-        # Source 2 + 3: live bets
-        # After _preload_hist_calib_from_db, many older bets now have true_prob
-        # backfilled from the hist_calib lookup (LLR-derived). Those go to proper.
-        # Bets still without true_prob fall back to entry-price proxy.
+        wins_live = 0
+        n_live_all = len(live_all)
         n_live_proper = 0
         for s in live_all:
             if s.get("won"):
                 wins_live += 1
-            tp    = float(s.get("true_prob", 0.0) or 0.0)
+            tp = float(s.get("true_prob", 0.0) or 0.0)
             entry = float(s.get("entry", 0.0) or 0.0)
             outcome = 1.0 if s.get("won") else 0.0
-
             if tp > 0.01:
-                # Has real true_prob — either saved at bet time OR backfilled from hist
                 bs_proper_vals.append((tp - outcome) ** 2)
                 n_live_proper += 1
             elif entry > 0.01:
-                # No hist match and no saved true_prob — use entry as last resort
                 tp_proxy = max(0.50, min(0.95, entry))
                 bs_proxy_vals.append((tp_proxy - outcome) ** 2)
 
-        n_hist   = len(hist)
+        n_hist = len(hist)
         n_hist_v = len(bs_hist_vals)
-        n_proxy  = len(bs_proxy_vals)
+        n_proxy = len(bs_proxy_vals)
         n_proper = len(bs_proper_vals)
-
-        if n_hist_v + n_proxy + n_proper < 10:
-            return {"score": 0, "n": n_live_all, "n_hist": n_hist,
-                    "n_proper": n_live_proper, "wr": 0.0, "brier": None, "n_calib": 0}
-
-        # Weighted pool: proper live 3x, proxy live 1x, hist 1x
-        w_sum  = (n_hist_v + n_proxy) + n_proper * 3
-        brier  = (
-            sum(bs_hist_vals) + sum(bs_proxy_vals) + sum(bs_proper_vals) * 3
-        ) / w_sum if w_sum > 0 else 0.25
-
         n_calib = n_hist_v + n_proxy + n_proper
-        wr_base = wins_live / n_live_all if n_live_all > 0 else 0.5
+        if n_calib < 10:
+            return {
+                "score": 0,
+                "n": n_live_all,
+                "n_hist": n_hist,
+                "n_proper": n_live_proper,
+                "n_proxy": n_proxy,
+                "wr": 0.0,
+                "brier": None,
+                "n_calib": 0,
+            }
+
+        w_hist = float(os.environ.get("CAL_W_HIST", "1.0") or 1.0)
+        w_proxy = float(os.environ.get("CAL_W_PROXY", "1.0") or 1.0)
+        w_proper = float(os.environ.get("CAL_W_PROPER", "3.0") or 3.0)
+        w_sum = n_hist_v * w_hist + n_proxy * w_proxy + n_proper * w_proper
+        if w_sum <= 1e-9:
+            w_sum = 1.0
+        brier = (
+            sum(bs_hist_vals) * w_hist
+            + sum(bs_proxy_vals) * w_proxy
+            + sum(bs_proper_vals) * w_proper
+        ) / w_sum
+
+        hist_sel = list(best_by_round.values())
+        wins_hist = sum(1 for s in hist_sel if float(s.get("true_prob", 0.0) or 0.0) >= hist_prob_min and bool(s.get("won")))
+        wr_hist = (wins_hist / n_hist_v) if n_hist_v > 0 else 0.5
+        wr_live = (wins_live / n_live_all) if n_live_all > 0 else 0.5
+        wr_mix_w_hist = float(os.environ.get("CAL_WR_W_HIST", "0.60") or 0.60)
+        wr_base = (wr_hist * wr_mix_w_hist) + (wr_live * (1.0 - wr_mix_w_hist))
 
         brier_score = max(0.0, min(1.0, (0.25 - brier) / 0.25))
         wr_score    = max(0.0, min(1.0, (wr_base - 0.50) / 0.35))
