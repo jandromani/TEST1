@@ -1436,7 +1436,7 @@ async def _score_market(self, m: dict) -> dict | None:
             _opp_bk = await self._fetch_pm_book_safe(opp_token_id)
         _opp_ask = (float(_opp_bk.get("best_ask", 0.0) or 0.0)
                     if isinstance(_opp_bk, dict) else 0.0) if _opp_bk else 0.0
-        if 0.01 < _opp_ask < 0.99:
+        if OPP_EVAL_MIN_OPP_ENTRY <= _opp_ask <= OPP_EVAL_MAX_OPP_ENTRY:
             _opp_prob = prob_down if side == "Up" else prob_up
             _opp_ev   = _opp_prob / max(_opp_ask, 1e-9) - 1.0
             _cur_ev   = true_prob / max(live_entry, 1e-9) - 1.0

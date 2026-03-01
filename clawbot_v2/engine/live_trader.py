@@ -1103,6 +1103,8 @@ ROLL_WR_BAD = float(os.environ.get("ROLL_WR_BAD", "0.46"))
 OPP_EVAL_ENABLED       = os.environ.get("OPP_EVAL_ENABLED", "true").lower() == "true"
 OPP_EVAL_TRIGGER_ENTRY = float(os.environ.get("OPP_EVAL_TRIGGER_ENTRY", "0.58"))  # flip when forced side > 58c
 OPP_EVAL_MIN_EV_GAIN   = float(os.environ.get("OPP_EVAL_MIN_EV_GAIN",   "0.08"))  # opp must beat cur EV by ≥8%
+OPP_EVAL_MIN_OPP_ENTRY = float(os.environ.get("OPP_EVAL_MIN_OPP_ENTRY", "0.15"))  # opp token must be ≥15c (not near-resolved)
+OPP_EVAL_MAX_OPP_ENTRY = float(os.environ.get("OPP_EVAL_MAX_OPP_ENTRY", "0.55"))  # opp token must be ≤55c (payout ≥1.82x)
 FRESH_RELAX_MIN_LEFT_15M = float(os.environ.get("FRESH_RELAX_MIN_LEFT_15M", "4.0"))
 FRESH_RELAX_MIN_LEFT_5M = float(os.environ.get("FRESH_RELAX_MIN_LEFT_5M", "2.0"))
 FRESH_RELAX_ENTRY_CAP = float(os.environ.get("FRESH_RELAX_ENTRY_CAP", "0.90"))
