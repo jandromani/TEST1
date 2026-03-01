@@ -1268,13 +1268,12 @@ async def _score_market(self, m: dict) -> dict | None:
         except Exception:
             pass
     if duration <= 5 and px_align_conflict and data_div_pen_applied:
-        if self._noisy_log_enabled(f"skip-5m-pxalign-div:{asset}:{cid}", LOG_SKIP_EVERY_SEC):
+        # Never hard-block in 5m mode: keep as score/edge penalty only.
+        if self._noisy_log_enabled(f"pxalign-div-info:{asset}:{cid}", LOG_SKIP_EVERY_SEC):
             print(
-                f"{Y}[SKIP]{RS} {asset} 5m hard conflict px-align+data-div "
+                f"{Y}[PXALIGN-DIV]{RS} {asset} 5m conflict kept info-only "
                 f"(src={px_src} cl_age={(-1.0 if cl_age_s is None else cl_age_s):.1f}s)"
             )
-        self._skip_tick("5m_pxalign_datadiv_conflict")
-        return None
 
     if MAX_WIN_MODE:
         if WINMODE_REQUIRE_CL_AGREE and not cl_agree:
@@ -1661,20 +1660,12 @@ async def _score_market(self, m: dict) -> dict | None:
 
     payout_mult = 1.0 / max(entry, 1e-9)
     if payout_mult < min_payout_req:
-        if payout_mult >= max(1.0, (min_payout_req - PAYOUT_NEAR_MISS_TOL)):
-            if self._noisy_log_enabled(f"payout-near-miss:{asset}:{side}", LOG_SKIP_EVERY_SEC):
-                print(
-                    f"{Y}[PAYOUT-TOL]{RS} {asset} {side} payout={payout_mult:.2f}x "
-                    f"near min={min_payout_req:.2f}x (tol={PAYOUT_NEAR_MISS_TOL:.2f}x)"
-                )
-        else:
-            if self._noisy_log_enabled(f"skip-score-payout:{asset}:{side}", LOG_SKIP_EVERY_SEC):
-                print(
-                    f"{Y}[SKIP] {asset} {side} payout={payout_mult:.3f}x "
-                    f"< min={min_payout_req:.3f}x{RS}"
-                )
-            self._skip_tick("payout_below")
-            return None
+        # Keep payout condition as telemetry only; do not block execution.
+        if self._noisy_log_enabled(f"payout-info:{asset}:{side}", LOG_SKIP_EVERY_SEC):
+            print(
+                f"{Y}[PAYOUT-INFO]{RS} {asset} {side} payout={payout_mult:.3f}x "
+                f"below target={min_payout_req:.3f}x (non-blocking)"
+            )
     # Polymarket fee is price-dependent: p*(1-p)*6.24% (parabolic, peaks at p=0.5).
     # FEE_RATE_EST (flat 1.56%) overcounts fees on high-payout entries (e.g. p=0.20 → actual=1.0%).
     _fee_dyn = max(0.001, entry * (1.0 - entry) * 0.0624)
