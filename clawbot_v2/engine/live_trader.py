@@ -9519,32 +9519,44 @@ class LiveTrader:
         return rows
 
     def _compute_calibration(self) -> dict:
-        """Hybrid calibration using both historical and live outcomes.
-
-        Uses weighted Brier with:
-        - source reliability weights (hist/proper/proxy)
-        - confidence weight (distance from 0.5)
-        - recency decay for live samples
-        """
+        """Hybrid calibration using historical + live with adaptive quality fitting."""
         live_all = [s for s in list(self._resolved_samples) if int(s.get("duration", 0) or 0) >= 15]
         hist = list(self._hist_calib_samples)
 
-        def _clamp01(v: float) -> float:
-            return max(0.0, min(1.0, float(v)))
-
         def _conf_w(tp: float) -> float:
-            # 0.60..1.80, stronger confidence gets more calibration weight.
             return 0.60 + 1.20 * abs(float(tp) - 0.5) * 2.0
 
-        def _w_brier(samples: list[tuple[float, float, float]]) -> tuple[float, float]:
-            # samples: (tp, outcome, weight)
-            if not samples:
-                return 0.25, 0.0
-            wsum = sum(w for _, _, w in samples)
+        def _p_adj(tp: float, k: float) -> float:
+            # Affine around 0.5; k<0 flips polarity when signal is anti-correlated.
+            return max(0.01, min(0.99, 0.5 + (float(tp) - 0.5) * float(k)))
+
+        def _eval_subset(samples: list[tuple[float, float, float]], k: float, conf_min: float):
+            picked = []
+            for tp, out, w in samples:
+                p = _p_adj(tp, k)
+                if abs(p - 0.5) * 2.0 < conf_min:
+                    continue
+                picked.append((p, out, w))
+            if len(picked) < 10:
+                return None
+            wsum = sum(w for _, _, w in picked)
             if wsum <= 1e-9:
-                return 0.25, 0.0
-            b = sum(((tp - out) ** 2) * w for tp, out, w in samples) / wsum
-            return float(b), float(wsum)
+                return None
+            brier = sum(((p - o) ** 2) * w for p, o, w in picked) / wsum
+            wr = sum((1.0 if ((p >= 0.5 and o >= 0.5) or (p < 0.5 and o < 0.5)) else 0.0) * w for p, o, w in picked) / wsum
+            sum_w2 = sum(w * w for _, _, w in picked)
+            n_eff_raw = (wsum * wsum) / max(1e-9, sum_w2)
+            brier_score = max(0.0, min(1.0, (0.25 - brier) / 0.25))
+            wr_score = max(0.0, min(1.0, (wr - 0.50) / 0.30))
+            n_eff = max(0.0, min(1.0, math.log1p(n_eff_raw) / math.log1p(2500.0)))
+            score = int((brier_score * 0.62 + wr_score * 0.28 + n_eff * 0.10) * 100)
+            return {
+                "score": score,
+                "brier": float(brier),
+                "wr": float(wr),
+                "n_eff_raw": float(n_eff_raw),
+                "n_picked": len(picked),
+            }
 
         # Keep strongest predicted side per historical round.
         best_by_round = {}
@@ -9562,7 +9574,6 @@ class LiveTrader:
             if (prev is None) or (tp > float(prev.get("true_prob", 0.0) or 0.0)):
                 best_by_round[k] = s
 
-        # Historical filter: adaptive threshold to keep quality without shrinking sample too hard.
         hist_prob_floor = float(os.environ.get("HIST_CALIB_PROB_MIN", "0.53") or 0.53)
         hist_probs = sorted(float(x.get("true_prob", 0.0) or 0.0) for x in best_by_round.values())
         hist_q60 = hist_probs[int(0.60 * (len(hist_probs) - 1))] if len(hist_probs) >= 5 else hist_prob_floor
@@ -9574,24 +9585,24 @@ class LiveTrader:
         live_half_life_h = max(1.0, float(os.environ.get("CAL_LIVE_HALFLIFE_H", "36") or 36.0))
         now_ts = _time.time()
 
-        hist_samples: list[tuple[float, float, float]] = []
+        all_samples: list[tuple[float, float, float]] = []
+        hist_samples_n = 0
+        proper_samples_n = 0
+        proxy_samples_n = 0
+        n_live_all = len(live_all)
+        n_live_proper = 0
+
         for s in best_by_round.values():
             tp = float(s.get("true_prob", 0.0) or 0.0)
             if tp < hist_min:
                 continue
             out = 1.0 if bool(s.get("won")) else 0.0
             w = w_hist_src * _conf_w(tp)
-            hist_samples.append((tp, out, w))
+            all_samples.append((tp, out, w))
+            hist_samples_n += 1
 
-        proper_samples: list[tuple[float, float, float]] = []
-        proxy_samples: list[tuple[float, float, float]] = []
-        wins_live = 0
-        n_live_all = len(live_all)
-        n_live_proper = 0
         for s in live_all:
             won = bool(s.get("won"))
-            if won:
-                wins_live += 1
             out = 1.0 if won else 0.0
             tp = float(s.get("true_prob", 0.0) or 0.0)
             entry = float(s.get("entry", 0.0) or 0.0)
@@ -9605,69 +9616,96 @@ class LiveTrader:
 
             if tp > 0.01:
                 w = w_proper_src * _conf_w(tp) * w_rec
-                proper_samples.append((tp, out, w))
+                all_samples.append((tp, out, w))
+                proper_samples_n += 1
                 n_live_proper += 1
             elif entry > 0.01:
                 tp_proxy = max(0.50, min(0.95, entry))
                 w = w_proxy_src * _conf_w(tp_proxy) * w_rec
-                proxy_samples.append((tp_proxy, out, w))
-
-        b_hist, w_hist = _w_brier(hist_samples)
-        b_prop, w_prop = _w_brier(proper_samples)
-        b_prx, w_prx = _w_brier(proxy_samples)
+                all_samples.append((tp_proxy, out, w))
+                proxy_samples_n += 1
 
         n_hist = len(hist)
-        n_hist_v = len(hist_samples)
-        n_proxy = len(proxy_samples)
-        n_proper = len(proper_samples)
-        n_calib = n_hist_v + n_proxy + n_proper
+        n_calib = hist_samples_n + proper_samples_n + proxy_samples_n
         if n_calib < 10:
             return {
                 "score": 0,
                 "n": n_live_all,
                 "n_hist": n_hist,
                 "n_proper": n_live_proper,
-                "n_proxy": n_proxy,
+                "n_proxy": proxy_samples_n,
                 "wr": 0.0,
                 "brier": None,
                 "n_calib": 0,
             }
 
-        w_sum = w_hist + w_prop + w_prx
-        if w_sum <= 1e-9:
-            w_sum = 1.0
-        brier = ((b_hist * w_hist) + (b_prop * w_prop) + (b_prx * w_prx)) / w_sum
+        # Adaptive fit: optimize polarity/scale k and confidence floor.
+        min_eff = max(60.0, float(os.environ.get("CAL_MIN_EFF_N", "220") or 220.0))
+        best = None
+        for k in [round(x * 0.1, 1) for x in range(-14, 15)]:
+            if -0.2 < k < 0.2:
+                continue
+            for conf_min in [0.00, 0.08, 0.12, 0.16, 0.20, 0.24, 0.28, 0.32]:
+                ev = _eval_subset(all_samples, k=k, conf_min=conf_min)
+                if not ev:
+                    continue
+                if ev["n_eff_raw"] < min_eff:
+                    continue
+                key = (
+                    ev["score"],
+                    -ev["brier"],
+                    ev["wr"],
+                    ev["n_eff_raw"],
+                )
+                if (best is None) or (key > best["key"]):
+                    best = {
+                        "key": key,
+                        "score": int(ev["score"]),
+                        "brier": float(ev["brier"]),
+                        "wr": float(ev["wr"]),
+                        "k": float(k),
+                        "conf_min": float(conf_min),
+                        "n_eff_raw": float(ev["n_eff_raw"]),
+                        "n_picked": int(ev["n_picked"]),
+                    }
 
-        wins_hist = sum(1 for s in hist_samples if s[1] > 0.5)
-        wr_hist = (wins_hist / n_hist_v) if n_hist_v > 0 else 0.5
-        wr_live = (wins_live / n_live_all) if n_live_all > 0 else 0.5
-
-        # Blend WR by effective information weight (not fixed 60/40).
-        wr_hist_w = w_hist / max(1e-9, (w_hist + w_prop + w_prx))
-        wr_live_w = 1.0 - wr_hist_w
-        wr_base = (wr_hist * wr_hist_w) + (wr_live * wr_live_w)
-
-        # Kish effective N from weights; prevents fake confidence from many tiny-weight samples.
-        all_w = [w for _, _, w in hist_samples] + [w for _, _, w in proper_samples] + [w for _, _, w in proxy_samples]
-        sum_w = sum(all_w)
-        sum_w2 = sum(w * w for w in all_w)
-        n_eff_raw = (sum_w * sum_w) / max(1e-9, sum_w2)
-
-        brier_score = max(0.0, min(1.0, (0.25 - brier) / 0.25))
-        wr_score = max(0.0, min(1.0, (wr_base - 0.50) / 0.30))
-        # Smoother sample contribution; no hard plateau at 500.
-        n_eff = max(0.0, min(1.0, math.log1p(n_eff_raw) / math.log1p(2000.0)))
-        score = int((brier_score * 0.62 + wr_score * 0.28 + n_eff * 0.10) * 100)
+        if best is None:
+            # Fallback to neutral calibration when constraints are too strict.
+            base = _eval_subset(all_samples, k=1.0, conf_min=0.0)
+            if not base:
+                return {
+                    "score": 0,
+                    "n": n_live_all,
+                    "n_hist": n_hist,
+                    "n_proper": n_live_proper,
+                    "n_proxy": proxy_samples_n,
+                    "wr": 0.0,
+                    "brier": None,
+                    "n_calib": n_calib,
+                }
+            best = {
+                "score": int(base["score"]),
+                "brier": float(base["brier"]),
+                "wr": float(base["wr"]),
+                "k": 1.0,
+                "conf_min": 0.0,
+                "n_eff_raw": float(base["n_eff_raw"]),
+                "n_picked": int(base["n_picked"]),
+            }
 
         return {
-            "score": score,
+            "score": int(best["score"]),
             "n": n_live_all,
             "n_hist": n_hist,
             "n_proper": n_live_proper,
-            "n_proxy": n_proxy,
-            "wr": round(wr_base * 100, 1),
-            "brier": round(brier, 4),
+            "n_proxy": proxy_samples_n,
+            "wr": round(best["wr"] * 100, 1),
+            "brier": round(best["brier"], 4),
             "n_calib": n_calib,
+            "cal_k": round(float(best["k"]), 2),
+            "cal_conf_min": round(float(best["conf_min"]), 2),
+            "cal_eff_n": int(float(best["n_eff_raw"])),
+            "cal_picked": int(best["n_picked"]),
         }
 
     def _dashboard_data(self) -> dict:
