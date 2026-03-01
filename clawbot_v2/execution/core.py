@@ -188,11 +188,12 @@ async def _execute_trade(self, sig: dict):
                 f"cid={self._short_cid(sig.get('cid',''))}"
             )
         t_ord = _time.perf_counter()
+        force_taker_now = True if ALWAYS_LIMIT_FOK_EXEC else bool(sig["force_taker"])
         exec_result = await self._place_order(
             sig["token_id"], sig["side"], sig["entry"], sig["size"],
             sig["asset"], sig["duration"], sig["mins_left"],
             sig["true_prob"], sig["cl_agree"],
-            min_edge_req=sig["min_edge"], force_taker=sig["force_taker"],
+            min_edge_req=sig["min_edge"], force_taker=force_taker_now,
             score=sig["score"], pm_book_data=sig.get("pm_book_data"),
             use_limit=sig.get("use_limit", False),
             max_entry_allowed=sig.get("max_entry_allowed", MAX_ENTRY_PRICE),
@@ -639,12 +640,18 @@ async def _place_order(self, token_id, side, price, size_usdc, asset, duration, 
                         f"{Y}[FAST-DEPTH]{RS} {asset} {side} insufficient depth "
                         f"${depth_now:.2f} < need ${needed_notional:.2f} @<= {taker_price:.3f}"
                     )
+                    if ALWAYS_LIMIT_FOK_EXEC:
+                        print(f"{Y}[EXEC-RESULT]{RS} {asset} {side} no-fill reason=fast_fok_depth")
+                        return None
                     force_taker = False
                 elif slip_now > slip_cap_bps:
                     print(
                         f"{Y}[SLIP-GUARD]{RS} {asset} {side} fast-taker blocked: "
                         f"slip={slip_now:.1f}bps(ref_ask={best_ask:.3f}) > cap={slip_cap_bps:.0f}bps"
                     )
+                    if ALWAYS_LIMIT_FOK_EXEC:
+                        print(f"{Y}[EXEC-RESULT]{RS} {asset} {side} no-fill reason=fast_fok_slip_guard")
+                        return None
                     force_taker = False
                 else:
                     print(
@@ -659,6 +666,9 @@ async def _place_order(self, token_id, side, price, size_usdc, asset, duration, 
                         print(f"{G}[FAST-FILL]{RS} {side} {asset} {duration}m | ${size_usdc:.2f} @ {taker_price:.3f} | Bank ${self.bankroll:.2f}")
                         return {"order_id": order_id, "fill_price": taker_price, "mode": "fok", "notional_usdc": size_usdc}
                     # FOK not filled (thin liquidity) — fall through to normal maker/taker flow
+                    if ALWAYS_LIMIT_FOK_EXEC:
+                        print(f"{Y}[EXEC-RESULT]{RS} {asset} {side} no-fill reason=fast_fok_unfilled")
+                        return None
                     print(f"{Y}[FOK] unfilled — falling back to maker{RS}")
                     force_taker = False  # reset so we don't loop
 

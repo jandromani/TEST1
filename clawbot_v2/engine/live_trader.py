@@ -658,6 +658,7 @@ FIVE_M_DYNAMIC_SCORE_WORSE_PF = float(os.environ.get("FIVE_M_DYNAMIC_SCORE_WORSE
 FIVE_M_DYNAMIC_SCORE_ADD_BAD = int(os.environ.get("FIVE_M_DYNAMIC_SCORE_ADD_BAD", "2"))
 FIVE_M_DYNAMIC_SCORE_ADD_WORSE = int(os.environ.get("FIVE_M_DYNAMIC_SCORE_ADD_WORSE", "3"))
 ORDER_FAST_MODE = os.environ.get("ORDER_FAST_MODE", "true").lower() == "true"
+ALWAYS_LIMIT_FOK_EXEC = os.environ.get("ALWAYS_LIMIT_FOK_EXEC", "true").lower() == "true"
 MAKER_POLL_5M_SEC = float(os.environ.get("MAKER_POLL_5M_SEC", "0.15"))
 MAKER_POLL_15M_SEC = float(os.environ.get("MAKER_POLL_15M_SEC", "0.25"))
 MAKER_WAIT_5M_SEC = float(os.environ.get("MAKER_WAIT_5M_SEC", "0.30"))
