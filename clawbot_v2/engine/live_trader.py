@@ -9425,6 +9425,7 @@ class LiveTrader:
         """Near-realtime order status cache from CLOB notifications."""
         if DRY_RUN or (not USER_EVENTS_ENABLED):
             return
+        _backoff = 0.0
         while True:
             try:
                 loop = asyncio.get_running_loop()
@@ -9444,9 +9445,15 @@ class LiveTrader:
                         pass
                 if len(self._order_event_cache) > 2000:
                     self._prune_order_event_cache()
+                _backoff = 0.0
             except Exception as e:
                 self._errors.tick("user_events_loop", print, err=e, every=20)
-            await asyncio.sleep(max(0.25, USER_EVENTS_POLL_SEC))
+                _err_s = str(e)
+                if "503" in _err_s or "502" in _err_s or "429" in _err_s:
+                    _backoff = min(30.0, max(2.0, _backoff * 2.0) if _backoff else 2.0)
+                else:
+                    _backoff = 0.0
+            await asyncio.sleep(max(USER_EVENTS_POLL_SEC, _backoff))
 
     async def _health_check(self):
         now = _time.time()
