@@ -426,6 +426,8 @@ STATS_FILE     = os.path.join(_DATA_DIR, "clawdbot_stats.json")
 METRICS_FILE   = os.path.join(_DATA_DIR, "clawdbot_onchain_metrics.jsonl")
 METRICS_DB_FILE = os.path.join(_DATA_DIR, "clawdbot_metrics.db")
 METRICS_DB_IMPORT_MAX_LINES = int(os.environ.get("METRICS_DB_IMPORT_MAX_LINES", "200000"))
+HIST_CALIB_ENABLED = os.environ.get("HIST_CALIB_ENABLED", "true").lower() == "true"
+HIST_CALIB_DAYS    = int(os.environ.get("HIST_CALIB_DAYS", "30"))
 RUNTIME_JSON_LOG_FILE = os.path.join(_DATA_DIR, "clawdbot_runtime_logs.jsonl")
 PNL_BASELINE_FILE = os.path.join(_DATA_DIR, "clawdbot_pnl_baseline.json")
 SETTLED_FILE   = os.path.join(_DATA_DIR, "clawdbot_settled_cids.json")
@@ -1402,6 +1404,7 @@ class LiveTrader:
         self.recent_trades   = deque(maxlen=30)   # rolling window for WR adaptation
         self.recent_pnl      = deque(maxlen=40)   # rolling pnl window for profit-factor/expectancy adaptation
         self._resolved_samples = deque(maxlen=2000)  # rolling settled outcomes for 15m calibration
+        self._hist_calib_samples = deque(maxlen=5000)  # historical calibration (bootstrapped from Gamma+Binance)
         self._pm_pattern_stats = {}
         self._pm_price_hist  = {}   # cid → deque(maxlen=40) of (ts, up_price) — YES token velocity
         self.side_perf       = {}                 # "ASSET|SIDE" -> {n, gross_win, gross_loss, pnl}
@@ -6062,6 +6065,263 @@ class LiveTrader:
         except Exception as e:
             print(f"{Y}[BOOT] resolved-sample bootstrap failed: {e}{RS}")
 
+    # ── HISTORICAL CALIBRATION BOOTSTRAP ──────────────────────────────────────
+    def _historical_calibration_sync(self, full_refetch: bool = False):
+        """Download historical Polymarket 15m rounds + Binance klines, compute LLR signals,
+        store in hist_calib table, load into _hist_calib_samples for Brier Score calibration.
+
+        Runs in a background thread so trading loops are not blocked.
+        Subsequent calls (every 6h) only fetch the last 1 day of new rounds unless full_refetch=True.
+        """
+        if not HIST_CALIB_ENABLED:
+            return
+        import urllib.request as _ur
+        import math
+
+        _SERIES_15M = {"BTC": 10192, "ETH": 10191, "SOL": 10423, "XRP": 10422}
+        _HDRS = {"User-Agent": "Mozilla/5.0", "Accept": "application/json"}
+        _BINANCE_KLINE = "https://api.binance.com/api/v3/klines"
+        now_ts = int(_time.time())
+
+        # ── 1. Init DB table ────────────────────────────────────────────────
+        try:
+            conn = sqlite3.connect(METRICS_DB_FILE, timeout=15.0)
+            conn.execute("""
+                CREATE TABLE IF NOT EXISTS hist_calib (
+                    id         INTEGER PRIMARY KEY AUTOINCREMENT,
+                    asset      TEXT    NOT NULL,
+                    round_ts   INTEGER NOT NULL,
+                    side       TEXT    NOT NULL,
+                    won        INTEGER NOT NULL,
+                    llr        REAL,
+                    true_prob  REAL,
+                    created_at INTEGER DEFAULT (CAST(strftime('%s','now') AS INTEGER)),
+                    UNIQUE(asset, round_ts, side)
+                )
+            """)
+            conn.commit()
+        except Exception as e:
+            print(f"{Y}[HIST_CALIB] DB init failed: {e}{RS}")
+            return
+
+        # ── 2. Determine fetch window ────────────────────────────────────────
+        try:
+            last_ts = conn.execute(
+                "SELECT MAX(round_ts) FROM hist_calib"
+            ).fetchone()[0] or 0
+        except Exception:
+            last_ts = 0
+
+        if full_refetch or last_ts == 0:
+            fetch_days = HIST_CALIB_DAYS
+        else:
+            # Only re-fetch last 2 days to pick up any missing rounds
+            fetch_days = 2
+
+        cutoff_ts = now_ts - fetch_days * 86400
+
+        # ── 3. Bulk fetch Binance 1m klines per asset ────────────────────────
+        print(f"{B}[HIST_CALIB]{RS} fetching {fetch_days}d Binance klines for calibration bootstrap...")
+        asset_klines = {}  # asset -> sorted list of (ts_ms, close)
+        for asset in _SERIES_15M:
+            symbol = f"{asset}USDT"
+            klines_dict = {}
+            start_ms = (cutoff_ts - 1800) * 1000
+            end_ms   = now_ts * 1000
+            while start_ms < end_ms:
+                url = (f"{_BINANCE_KLINE}?symbol={symbol}&interval=1m"
+                       f"&startTime={int(start_ms)}&limit=1000")
+                try:
+                    req = _ur.Request(url, headers=_HDRS)
+                    with _ur.urlopen(req, timeout=15) as resp:
+                        batch = json.loads(resp.read())
+                except Exception:
+                    break
+                if not batch:
+                    break
+                for k in batch:
+                    klines_dict[int(k[0])] = float(k[4])  # open_ts_ms → close
+                last_batch_ts = int(batch[-1][0])
+                start_ms = last_batch_ts + 60_000
+                if len(batch) < 1000:
+                    break
+                _time.sleep(0.08)
+            # Sort ascending by ts
+            asset_klines[asset] = sorted(klines_dict.items())
+            print(f"[HIST_CALIB] {asset}: {len(asset_klines[asset])} 1m candles loaded")
+
+        # ── 4. Fetch resolved Gamma events ───────────────────────────────────
+        all_rounds = []  # (asset, round_start_ts, side, won)
+        for asset, sid in _SERIES_15M.items():
+            offset = 0
+            while True:
+                url = (f"https://gamma-api.polymarket.com/events"
+                       f"?series_id={sid}&closed=true&limit=200&offset={offset}")
+                try:
+                    req = _ur.Request(url, headers=_HDRS)
+                    with _ur.urlopen(req, timeout=15) as resp:
+                        events = json.loads(resp.read())
+                except Exception:
+                    break
+                if not events:
+                    break
+                stop_paging = False
+                for ev in events:
+                    end_str = str(ev.get("endDate") or ev.get("endDateIso") or "")[:19]
+                    if not end_str:
+                        continue
+                    try:
+                        from datetime import datetime as _dt, timezone as _tz
+                        end_ts = int(_dt.fromisoformat(end_str.replace("Z","")).replace(
+                            tzinfo=_tz.utc).timestamp())
+                    except Exception:
+                        continue
+                    if end_ts < cutoff_ts:
+                        stop_paging = True
+                        break
+                    round_start_ts = end_ts - 900  # 15m before close
+                    for mkt in ev.get("markets", []):
+                        try:
+                            op = mkt.get("outcomePrices", [])
+                            oc = mkt.get("outcomes", [])
+                            if isinstance(op, str):
+                                op = json.loads(op)
+                            if isinstance(oc, str):
+                                oc = json.loads(oc)
+                            p0, p1 = float(op[0]), float(op[1])
+                        except Exception:
+                            continue
+                        if p0 > 0.90:
+                            winner = str(oc[0])
+                        elif p1 > 0.90:
+                            winner = str(oc[1])
+                        else:
+                            continue
+                        for side in ("Up", "Down"):
+                            won = 1 if winner == side else 0
+                            all_rounds.append((asset, round_start_ts, side, won))
+                offset += 200
+                if len(events) < 200 or stop_paging:
+                    break
+
+        print(f"[HIST_CALIB] fetched {len(all_rounds)//2} resolved rounds from Gamma")
+
+        # ── 5. For each new round: compute LLR → true_prob → store ──────────
+        # Build fast lookup: asset → list of (ts_ms, close) sorted asc
+        def _get_closes_before(asset: str, before_ts_ms: int, n: int):
+            """Return last n closes (ts_ms <= before_ts_ms) for asset."""
+            lst = asset_klines.get(asset, [])
+            # binary search for before_ts_ms
+            lo, hi = 0, len(lst)
+            while lo < hi:
+                mid = (lo + hi) // 2
+                if lst[mid][0] <= before_ts_ms:
+                    lo = mid + 1
+                else:
+                    hi = mid
+            return [c for _, c in lst[max(0, lo-n):lo]]
+
+        new_count = 0
+        for asset, round_start_ts, side, won in all_rounds:
+            cur = conn.execute(
+                "SELECT id FROM hist_calib WHERE asset=? AND round_ts=? AND side=?",
+                (asset, round_start_ts, side)
+            )
+            if cur.fetchone():
+                continue  # already stored
+
+            round_start_ms = round_start_ts * 1000
+            closes = _get_closes_before(asset, round_start_ms, 32)
+            if len(closes) < 8:
+                continue
+
+            # Compute sigma_1m from recent closes
+            rets = [(closes[i] - closes[i-1]) / closes[i-1]
+                    for i in range(1, len(closes)) if closes[i-1] > 0]
+            if len(rets) < 5:
+                continue
+            sigma_1m = max((sum(r*r for r in rets) / len(rets)) ** 0.5, 1e-8)
+            sigma_15m = sigma_1m * (15 ** 0.5)
+
+            # Signal 1: 30-bar 1m trend
+            n_bars = min(30, len(closes) - 1)
+            c0, c1 = closes[-(n_bars+1)], closes[-1]
+            if c0 <= 0 or sigma_15m <= 0:
+                continue
+            ret = (c1 - c0) / c0
+            llr = ret / sigma_15m * 0.8  # LLR_KLINE_MULT
+
+            # Signal 8b: BTC displacement for alts
+            if asset != "BTC":
+                btc_closes = _get_closes_before("BTC", round_start_ms, 32)
+                if len(btc_closes) >= 8:
+                    btc_rets = [(btc_closes[i] - btc_closes[i-1]) / btc_closes[i-1]
+                                for i in range(1, len(btc_closes)) if btc_closes[i-1] > 0]
+                    if btc_rets:
+                        btc_sigma_1m = max((sum(r*r for r in btc_rets) / len(btc_rets)) ** 0.5, 1e-8)
+                        btc_sigma15  = btc_sigma_1m * (15 ** 0.5)
+                        # BTC move over last 30m before round start
+                        btc_c0_30 = _get_closes_before("BTC", round_start_ms - 30*60*1000, 1)
+                        btc_c1    = btc_closes[-1]
+                        if btc_c0_30 and btc_c0_30[0] > 0 and btc_sigma15 > 0:
+                            btc_ret = (btc_c1 - btc_c0_30[0]) / btc_c0_30[0]
+                            corr = {"ETH": 0.82, "SOL": 0.80, "XRP": 0.78}.get(asset, 0.77)
+                            llr += btc_ret / btc_sigma15 * corr * 0.8
+
+            # Convert llr → prob_up → true_prob for this side
+            prob_up = 1.0 / (1.0 + math.exp(-llr))
+            true_prob = prob_up if side == "Up" else (1.0 - prob_up)
+            true_prob = max(0.05, min(0.95, true_prob))
+
+            try:
+                conn.execute(
+                    "INSERT OR IGNORE INTO hist_calib (asset, round_ts, side, won, llr, true_prob) "
+                    "VALUES (?,?,?,?,?,?)",
+                    (asset, round_start_ts, side, won, round(llr, 6), round(true_prob, 6))
+                )
+                new_count += 1
+            except Exception:
+                pass
+
+        if new_count > 0:
+            conn.commit()
+
+        # ── 6. Load ALL from DB into _hist_calib_samples ─────────────────────
+        self._hist_calib_samples.clear()
+        rows = conn.execute(
+            "SELECT asset, side, round_ts, won, true_prob FROM hist_calib ORDER BY round_ts ASC"
+        ).fetchall()
+        conn.close()
+
+        for asset, side, round_ts, won, true_prob in rows:
+            self._hist_calib_samples.append({
+                "asset":      str(asset or ""),
+                "side":       str(side or ""),
+                "duration":   15,
+                "won":        bool(won),
+                "true_prob":  float(true_prob or 0.0),
+                "source":     "hist_calib",
+            })
+
+        print(f"{B}[HIST_CALIB]{RS} {len(self._hist_calib_samples)} historical samples loaded "
+              f"({new_count} new), {len(self._resolved_samples)} live samples")
+
+    async def _historical_calibration_loop(self):
+        """Background loop: bootstrap historical calibration on start, then refresh every 6h."""
+        if not HIST_CALIB_ENABLED:
+            return
+        await asyncio.sleep(45)  # let bot warm up first
+        first_run = True
+        while True:
+            try:
+                await asyncio.to_thread(
+                    self._historical_calibration_sync, first_run
+                )
+            except Exception as e:
+                print(f"{Y}[HIST_CALIB] loop error: {e}{RS}")
+            first_run = False
+            await asyncio.sleep(6 * 3600)
+
     def _pm_pattern_key(self, asset: str, duration: int, side: str, copy_net: float, flow: dict) -> str:
         low_share = float((flow or {}).get("low_c_share", 0.0) or 0.0)
         high_share = float((flow or {}).get("high_c_share", 0.0) or 0.0)
@@ -8994,36 +9254,72 @@ class LiveTrader:
         return rows
 
     def _compute_calibration(self) -> dict:
-        """Proper Brier Score calibration from ALL resolved 15m outcomes (up to 2000).
-        Uses true_prob (model's actual predicted probability) when available,
-        falls back to entry price as proxy for historical samples.
-        Persistent: _resolved_samples is rebuilt from metrics.db on every boot.
-        Brier Score = mean((predicted_prob - actual_outcome)^2).
-        Perfect=0.0, random=0.25. Score = max(0, (0.25-BS)/0.25*100).
+        """Brier Score calibration merging live bets + historical Gamma/Binance retrocomputed signals.
+
+        Live samples (actual bets) use true_prob stored at bet time, or entry as proxy.
+        Historical samples (all 15m rounds, not just bets) use retrocomputed LLR→true_prob.
+        Live samples weighted 3x vs historical for the calibration score.
+
+        Brier Score = mean((predicted_prob - actual_outcome)^2).  Perfect=0.0, random=0.25.
         """
-        samples = [s for s in list(self._resolved_samples) if int(s.get("duration", 0) or 0) >= 15]
-        n = len(samples)
-        if n < 5:
-            return {"score": 0, "n": n, "wr": 0.0, "brier": None}
-        wins = sum(1 for s in samples if s.get("won"))
-        wr   = wins / n
-        # Brier Score: use true_prob if stored, else entry as proxy
-        bs_vals = []
-        for s in samples:
+        live = [s for s in list(self._resolved_samples) if int(s.get("duration", 0) or 0) >= 15]
+        hist = list(self._hist_calib_samples)  # already filtered to duration=15
+
+        # Build combined weighted list: live 3x, hist 1x
+        bs_vals_live, bs_vals_hist = [], []
+        wins_live = wins_hist = 0
+
+        for s in live:
             tp = float(s.get("true_prob", 0.0) or 0.0)
-            if tp < 0.50:                          # no true_prob stored — use entry as proxy
+            if tp < 0.50:
                 tp = max(0.50, float(s.get("entry", 0.50) or 0.50))
             outcome = 1.0 if s.get("won") else 0.0
-            bs_vals.append((tp - outcome) ** 2)
-        brier = sum(bs_vals) / len(bs_vals)
-        # Convert to 0-100: perfect(0.0)→100, random(0.25)→0
+            bs_vals_live.append((tp - outcome) ** 2)
+            if s.get("won"):
+                wins_live += 1
+
+        for s in hist:
+            tp = float(s.get("true_prob", 0.0) or 0.0)
+            if tp < 0.01:
+                continue
+            outcome = 1.0 if s.get("won") else 0.0
+            bs_vals_hist.append((tp - outcome) ** 2)
+            if s.get("won"):
+                wins_hist += 1
+
+        n_live = len(bs_vals_live)
+        n_hist = len(bs_vals_hist)
+        n_total = n_live + n_hist
+
+        if n_total < 5:
+            return {"score": 0, "n": n_live, "n_hist": n_hist, "wr": 0.0, "brier": None}
+
+        # Weighted Brier score (live 3x)
+        w_live = 3.0 * n_live
+        w_hist = float(n_hist)
+        denom  = w_live + w_hist
+        if denom > 0 and bs_vals_live:
+            brier_live = sum(bs_vals_live) / n_live
+            brier_hist = (sum(bs_vals_hist) / n_hist) if n_hist > 0 else brier_live
+            brier = (brier_live * w_live + brier_hist * w_hist) / denom
+        elif bs_vals_hist:
+            brier = sum(bs_vals_hist) / n_hist
+        else:
+            brier = 0.25
+
+        # Win rate: live only (more meaningful)
+        wr_base = wins_live / n_live if n_live > 0 else (
+            (wins_live + wins_hist) / n_total)
+
         brier_score = max(0.0, min(1.0, (0.25 - brier) / 0.25))
-        # WR component — edge over baseline 50%
-        wr_score = max(0.0, min(1.0, (wr - 0.50) / 0.35))
-        # Sample confidence: more data = more reliable
-        n_score  = min(1.0, n / 50.0)
-        score = int((brier_score * 0.60 + wr_score * 0.25 + n_score * 0.15) * 100)
-        return {"score": score, "n": n, "wr": round(wr * 100, 1), "brier": round(brier, 4)}
+        wr_score    = max(0.0, min(1.0, (wr_base - 0.50) / 0.35))
+        # confidence: use total sample count (hist adds signal strength)
+        n_eff   = min(1.0, (n_live * 3 + n_hist) / 150.0)
+        score   = int((brier_score * 0.60 + wr_score * 0.25 + n_eff * 0.15) * 100)
+        return {
+            "score": score, "n": n_live, "n_hist": n_hist,
+            "wr": round(wr_base * 100, 1), "brier": round(brier, 4),
+        }
 
     def _dashboard_data(self) -> dict:
         """Collect current bot state as a JSON-serialisable dict for the web dashboard."""
@@ -9717,7 +10013,7 @@ function renderMetrics(d){
     ['Open Stake','$'+fmt(d.open_stake),'Mark <b>$'+fmt(d.open_mark)+'</b>'],
   ].map(([l,v,s])=>
     `<div class="mi"><div class="mi-l">${l}</div><div class="mi-v">${v}</div><div class="mi-s">${s}</div></div>`
-  ).join('')+`<div class="mi"><div class="mi-l">Calibration</div><div class="mi-v"><span class="${cc}">${cs}%</span></div><div class="mi-s">${calBar}<span style="font-size:.7em;opacity:.6">${cal.n} samples · WR ${cal.wr}%</span></div></div>`;
+  ).join('')+`<div class="mi"><div class="mi-l">Calibration</div><div class="mi-v"><span class="${cc}">${cs}%</span></div><div class="mi-s">${calBar}<span style="font-size:.7em;opacity:.6">${cal.n} live + ${cal.n_hist||0} hist · WR ${cal.wr}%${cal.brier!=null?' · BS '+cal.brier:''}</span></div></div>`;
 }
 
 function drawSparkline(canvas,wp,openP,lead){
@@ -10372,6 +10668,7 @@ setInterval(pollMid,2000);
             _guard("_stream_binance_liquidations", self._stream_binance_liquidations),
             _guard("_oi_ls_loop",           self._oi_ls_loop),
             _guard("_dashboard_loop",       self._dashboard_loop),
+            _guard("_historical_calibration_loop", self._historical_calibration_loop),
         )
 
 
