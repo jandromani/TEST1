@@ -7464,19 +7464,24 @@ class LiveTrader:
     def _calib_size_scale(self) -> float:
         """Scale Kelly size based on model calibration quality.
 
-        Uses the combined Brier Score + WR calibration score (0-100).
-        Requires at least 40 live+hist samples to activate.
-        Scale: 0.75 (score=0, random model) → 1.00 (score=100, perfect calibration).
-        Only reduces size — never increases above baseline.
+        Hist data provides the baseline score; live proper bets update it.
+        Cached: only recomputes when resolved_samples or hist_calib_samples count changes.
+        Scale: 0.75 (score=0) → 1.00 (score=100). Only reduces, never increases.
         """
         try:
             n_live = len(self._resolved_samples)
             n_hist = len(self._hist_calib_samples)
-            if n_live + n_hist < 40:
+            if n_hist < 10:
                 return 1.0
+            # Use cached value if counts unchanged (avoid recomputing on every bet)
+            cache = getattr(self, "_calib_scale_cache", None)
+            if cache and cache[0] == n_live and cache[1] == n_hist:
+                return cache[2]
             calib = self._compute_calibration()
             score = int(calib.get("score", 50) or 50)
-            return round(0.75 + 0.25 * (score / 100.0), 4)
+            scale = round(0.75 + 0.25 * (score / 100.0), 4)
+            self._calib_scale_cache = (n_live, n_hist, scale)
+            return scale
         except Exception:
             return 1.0
 
@@ -9298,71 +9303,74 @@ class LiveTrader:
         return rows
 
     def _compute_calibration(self) -> dict:
-        """Brier Score calibration merging live bets + historical Gamma/Binance retrocomputed signals.
+        """Brier Score calibration: ALL historical rounds + live proper bets in one pool.
 
-        Live samples (actual bets) use true_prob stored at bet time, or entry as proxy.
-        Historical samples (all 15m rounds, not just bets) use retrocomputed LLR→true_prob.
-        Live samples weighted 3x vs historical for the calibration score.
+        Data sources:
+          - hist_calib_samples: 5000+ Gamma resolved rounds, LLR→true_prob retrocomputed.
+            This is the BASE — calibrates the signal across ALL market conditions.
+          - resolved_samples: actual live bets. Only those with genuine true_prob
+            (saved at bet time, not the old entry-price proxy) are included in BS.
+            They UPDATE the pool as they accumulate.
 
-        Brier Score = mean((predicted_prob - actual_outcome)^2).  Perfect=0.0, random=0.25.
+        Both sources measure the same thing: (predicted_prob, outcome) pairs.
+        They are pooled together — hist is just the initial calibration data,
+        live bets add to it after each resolved round.
+
+        Brier Score = mean((predicted_prob - actual_outcome)^2).
+          perfect=0.0, random=0.25.
         """
-        live = [s for s in list(self._resolved_samples) if int(s.get("duration", 0) or 0) >= 15]
-        hist = list(self._hist_calib_samples)  # already filtered to duration=15
+        live_all = [s for s in list(self._resolved_samples) if int(s.get("duration", 0) or 0) >= 15]
+        hist     = list(self._hist_calib_samples)
 
-        # Build combined weighted list: live 3x, hist 1x
-        bs_vals_live, bs_vals_hist = [], []
-        wins_live = wins_hist = 0
+        # ── Pool all calibration samples together ────────────────────────────
+        bs_all = []
+        wins_live = 0
+        n_live_all = len(live_all)
 
-        for s in live:
-            tp = float(s.get("true_prob", 0.0) or 0.0)
-            if tp < 0.50:
-                tp = max(0.50, float(s.get("entry", 0.50) or 0.50))
-            outcome = 1.0 if s.get("won") else 0.0
-            bs_vals_live.append((tp - outcome) ** 2)
-            if s.get("won"):
-                wins_live += 1
-
+        # Hist samples — all have retrocomputed LLR→true_prob
         for s in hist:
             tp = float(s.get("true_prob", 0.0) or 0.0)
             if tp < 0.01:
                 continue
             outcome = 1.0 if s.get("won") else 0.0
-            bs_vals_hist.append((tp - outcome) ** 2)
+            bs_all.append((tp - outcome) ** 2)
+
+        # Live bets — only include if true_prob was genuinely saved at bet time
+        # (not the old entry proxy). Detect: true_prob was stored as a signal output,
+        # so it differs meaningfully from the entry price.
+        n_live_proper = 0
+        for s in live_all:
             if s.get("won"):
-                wins_hist += 1
+                wins_live += 1
+            tp    = float(s.get("true_prob", 0.0) or 0.0)
+            entry = float(s.get("entry", 0.0) or 0.0)
+            if tp < 0.01 or abs(tp - entry) < 0.002:
+                continue   # skip proxy entries (true_prob == entry ≈ old bets)
+            outcome = 1.0 if s.get("won") else 0.0
+            bs_all.append((tp - outcome) ** 2)
+            n_live_proper += 1
 
-        n_live = len(bs_vals_live)
-        n_hist = len(bs_vals_hist)
-        n_total = n_live + n_hist
+        n_total = len(bs_all)
+        n_hist  = len(hist)
 
-        if n_total < 5:
-            return {"score": 0, "n": n_live, "n_hist": n_hist, "wr": 0.0, "brier": None}
+        if n_total < 10:
+            return {"score": 0, "n": n_live_all, "n_hist": n_hist,
+                    "n_proper": n_live_proper, "wr": 0.0, "brier": None}
 
-        # Weighted Brier score (live 3x)
-        w_live = 3.0 * n_live
-        w_hist = float(n_hist)
-        denom  = w_live + w_hist
-        if denom > 0 and bs_vals_live:
-            brier_live = sum(bs_vals_live) / n_live
-            brier_hist = (sum(bs_vals_hist) / n_hist) if n_hist > 0 else brier_live
-            brier = (brier_live * w_live + brier_hist * w_hist) / denom
-        elif bs_vals_hist:
-            brier = sum(bs_vals_hist) / n_hist
-        else:
-            brier = 0.25
-
-        # Win rate: live only (more meaningful)
-        wr_base = wins_live / n_live if n_live > 0 else (
-            (wins_live + wins_hist) / n_total)
+        brier   = sum(bs_all) / n_total
+        wr_base = wins_live / n_live_all if n_live_all > 0 else 0.5
 
         brier_score = max(0.0, min(1.0, (0.25 - brier) / 0.25))
         wr_score    = max(0.0, min(1.0, (wr_base - 0.50) / 0.35))
-        # confidence: use total sample count (hist adds signal strength)
-        n_eff   = min(1.0, (n_live * 3 + n_hist) / 150.0)
-        score   = int((brier_score * 0.60 + wr_score * 0.25 + n_eff * 0.15) * 100)
+        # confidence: saturates at ~5000 samples (one hist batch is already saturated)
+        n_eff   = min(1.0, n_total / 500.0)
+        score   = int((brier_score * 0.65 + wr_score * 0.20 + n_eff * 0.15) * 100)
         return {
-            "score": score, "n": n_live, "n_hist": n_hist,
-            "wr": round(wr_base * 100, 1), "brier": round(brier, 4),
+            "score": score, "n": n_live_all, "n_hist": n_hist,
+            "n_proper": n_live_proper,
+            "wr": round(wr_base * 100, 1),
+            "brier": round(brier, 4),
+            "n_calib": n_total,
         }
 
     def _dashboard_data(self) -> dict:
@@ -10057,7 +10065,7 @@ function renderMetrics(d){
     ['Open Stake','$'+fmt(d.open_stake),'Mark <b>$'+fmt(d.open_mark)+'</b>'],
   ].map(([l,v,s])=>
     `<div class="mi"><div class="mi-l">${l}</div><div class="mi-v">${v}</div><div class="mi-s">${s}</div></div>`
-  ).join('')+`<div class="mi"><div class="mi-l">Calibration</div><div class="mi-v"><span class="${cc}">${cs}%</span></div><div class="mi-s">${calBar}<span style="font-size:.7em;opacity:.6">${cal.n} live + ${cal.n_hist||0} hist · WR ${cal.wr}%${cal.brier!=null?' · BS '+cal.brier:''}</span></div></div>`;
+  ).join('')+`<div class="mi"><div class="mi-l">Calibration</div><div class="mi-v"><span class="${cc}">${cs}%</span></div><div class="mi-s">${calBar}<span style="font-size:.7em;opacity:.6">${cal.n_calib||0} samples (${cal.n_hist||0} hist+${cal.n_proper||0} live) · WR ${cal.wr}% · BS ${cal.brier!=null?cal.brier:'?'}</span></div></div>`;
 }
 
 function drawSparkline(canvas,wp,openP,lead){
