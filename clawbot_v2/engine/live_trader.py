@@ -636,10 +636,10 @@ NEXT_MARKET_ANALYSIS_ENABLED = os.environ.get("NEXT_MARKET_ANALYSIS_ENABLED", "t
 NEXT_MARKET_ANALYSIS_WINDOW_SEC = float(os.environ.get("NEXT_MARKET_ANALYSIS_WINDOW_SEC", "180"))
 NEXT_MARKET_ANALYSIS_LOG_EVERY_SEC = float(os.environ.get("NEXT_MARKET_ANALYSIS_LOG_EVERY_SEC", "15"))
 NEXT_MARKET_ANALYSIS_MIN_CONF = float(os.environ.get("NEXT_MARKET_ANALYSIS_MIN_CONF", "0.54"))  # was 0.56
-# Safety default: keep 5m disabled unless explicitly force-enabled.
-FORCE_DISABLE_5M = os.environ.get("FORCE_DISABLE_5M", "true").lower() == "true"
-ENABLE_5M = (os.environ.get("ENABLE_5M", "false").lower() == "true") and (not FORCE_DISABLE_5M)
-FIVE_M_RUNTIME_GUARD_ENABLED = os.environ.get("FIVE_M_RUNTIME_GUARD_ENABLED", "true").lower() == "true"
+# Default: keep 5m enabled unless explicitly disabled.
+FORCE_DISABLE_5M = os.environ.get("FORCE_DISABLE_5M", "false").lower() == "true"
+ENABLE_5M = (os.environ.get("ENABLE_5M", "true").lower() == "true") and (not FORCE_DISABLE_5M)
+FIVE_M_RUNTIME_GUARD_ENABLED = os.environ.get("FIVE_M_RUNTIME_GUARD_ENABLED", "false").lower() == "true"
 FIVE_M_GUARD_WINDOW = int(os.environ.get("FIVE_M_GUARD_WINDOW", "20"))
 FIVE_M_GUARD_DISABLE_MIN_OUTCOMES = int(os.environ.get("FIVE_M_GUARD_DISABLE_MIN_OUTCOMES", "12"))
 FIVE_M_GUARD_DISABLE_PF = float(os.environ.get("FIVE_M_GUARD_DISABLE_PF", "1.00"))
