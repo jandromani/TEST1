@@ -1536,13 +1536,13 @@ async def _score_market(self, m: dict) -> dict | None:
         roll_wr_lb = float(rolling_profile.get("wr_lb", 0.5) or 0.5)
         if roll_n >= max(8, int(ROLLING_15M_CALIB_MIN_N)):
             if roll_exp >= ROLL_EXP_GOOD and roll_wr_lb >= ROLL_WR_GOOD:
-                dyn_floor = 1.50
+                dyn_floor = ROLL_DYN_FLOOR_GOOD
             elif roll_exp <= ROLL_EXP_BAD or roll_wr_lb < ROLL_WR_BAD:
-                dyn_floor = 1.78
+                dyn_floor = ROLL_DYN_FLOOR_BAD
             else:
-                dyn_floor = 1.62
+                dyn_floor = ROLL_DYN_FLOOR_NEUTRAL
         else:
-            dyn_floor = 1.62
+            dyn_floor = ROLL_DYN_FLOOR_NEUTRAL
         min_payout_req = max(min_payout_req, dyn_floor)
     # Late-window locked-direction payout relax:
     # Win rate is ~72-78% in last LATE_PAYOUT_RELAX_PCT_LEFT of window → 1.65x payout is +EV.

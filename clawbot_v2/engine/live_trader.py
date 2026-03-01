@@ -1099,6 +1099,9 @@ ROLL_EXP_GOOD = float(os.environ.get("ROLL_EXP_GOOD", "0.10"))
 ROLL_WR_GOOD = float(os.environ.get("ROLL_WR_GOOD", "0.50"))
 ROLL_EXP_BAD = float(os.environ.get("ROLL_EXP_BAD", "-0.10"))
 ROLL_WR_BAD = float(os.environ.get("ROLL_WR_BAD", "0.46"))
+ROLL_DYN_FLOOR_BAD     = float(os.environ.get("ROLL_DYN_FLOOR_BAD",     "1.72"))
+ROLL_DYN_FLOOR_NEUTRAL = float(os.environ.get("ROLL_DYN_FLOOR_NEUTRAL", "1.62"))
+ROLL_DYN_FLOOR_GOOD    = float(os.environ.get("ROLL_DYN_FLOOR_GOOD",    "1.50"))
 # Opposite-side eval: when forced-trend entry is too expensive, try the other side
 OPP_EVAL_ENABLED       = os.environ.get("OPP_EVAL_ENABLED", "true").lower() == "true"
 OPP_EVAL_TRIGGER_ENTRY = float(os.environ.get("OPP_EVAL_TRIGGER_ENTRY", "0.58"))  # flip when forced side > 58c
