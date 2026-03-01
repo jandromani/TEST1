@@ -707,24 +707,25 @@ async def _score_market(self, m: dict) -> dict | None:
                 f"n={recent_side_n} exp={recent_side_exp:+.2f} wr_lb={recent_side_wr_lb:.2f}"
             )
     # Asset+entry-band profile from settled on-chain outcomes.
-    aq_entry = up_price if side_up else (1.0 - up_price)
-    aq = self._asset_entry_profile(asset, duration, side, aq_entry, open_src, cl_age_s)
-    aq_score = int(aq.get("score_adj", 0) or 0)
-    aq_edge = float(aq.get("edge_adj", 0.0) or 0.0)
-    aq_prob = float(aq.get("prob_adj", 0.0) or 0.0)
-    asset_entry_size_mult = float(aq.get("size_mult", 1.0) or 1.0)
-    if aq_score != 0 or abs(aq_edge) > DEFAULT_EPS or abs(aq_prob) > DEFAULT_EPS:
-        score += aq_score
-        edge += aq_edge
-        true_prob = max(0.05, min(0.95, true_prob + aq_prob))
-        if self._noisy_log_enabled(f"onchain-q:{asset}:{duration}:{side}", LOG_FLOW_EVERY_SEC):
-            print(
-                f"{B}[ONCHAIN-Q]{RS} {asset} {duration}m {side} "
-                f"band={aq.get('band','?')} n={int(aq.get('n',0) or 0)} "
-                f"wr_lb={float(aq.get('wr_lb',0.5) or 0.5):.2f} pf={float(aq.get('pf',1.0) or 1.0):.2f} "
-                f"exp={float(aq.get('exp',0.0) or 0.0):+.2f} "
-                f"adj(score={aq_score:+d},edge={aq_edge:+.3f},prob={aq_prob:+.3f},size_x={asset_entry_size_mult:.2f})"
-            )
+    if ONCHAIN_Q_ENABLED:
+        aq_entry = up_price if side_up else (1.0 - up_price)
+        aq = self._asset_entry_profile(asset, duration, side, aq_entry, open_src, cl_age_s)
+        aq_score = int(aq.get("score_adj", 0) or 0)
+        aq_edge = float(aq.get("edge_adj", 0.0) or 0.0)
+        aq_prob = float(aq.get("prob_adj", 0.0) or 0.0)
+        asset_entry_size_mult = float(aq.get("size_mult", 1.0) or 1.0)
+        if aq_score != 0 or abs(aq_edge) > DEFAULT_EPS or abs(aq_prob) > DEFAULT_EPS:
+            score += aq_score
+            edge += aq_edge
+            true_prob = max(0.05, min(0.95, true_prob + aq_prob))
+            if self._noisy_log_enabled(f"onchain-q:{asset}:{duration}:{side}", LOG_FLOW_EVERY_SEC):
+                print(
+                    f"{B}[ONCHAIN-Q]{RS} {asset} {duration}m {side} "
+                    f"band={aq.get('band','?')} n={int(aq.get('n',0) or 0)} "
+                    f"wr_lb={float(aq.get('wr_lb',0.5) or 0.5):.2f} pf={float(aq.get('pf',1.0) or 1.0):.2f} "
+                    f"exp={float(aq.get('exp',0.0) or 0.0):+.2f} "
+                    f"adj(score={aq_score:+d},edge={aq_edge:+.3f},prob={aq_prob:+.3f},size_x={asset_entry_size_mult:.2f})"
+                )
     tf_votes = tf_up_votes if side_up else tf_dn_votes
     ob_sig = dw_ob if side_up else -dw_ob
     cl_agree = True

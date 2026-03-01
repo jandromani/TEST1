@@ -354,7 +354,7 @@ LATE_DIR_LOCK_ENABLED = os.environ.get("LATE_DIR_LOCK_ENABLED", "true").lower() 
 LATE_DIR_LOCK_MIN_LEFT_5M = float(os.environ.get("LATE_DIR_LOCK_MIN_LEFT_5M", "2.2"))
 LATE_DIR_LOCK_MIN_LEFT_15M = float(os.environ.get("LATE_DIR_LOCK_MIN_LEFT_15M", "6.0"))
 LATE_DIR_LOCK_MIN_MOVE_PCT = float(os.environ.get("LATE_DIR_LOCK_MIN_MOVE_PCT", "0.0002"))
-EVENT_ALIGN_GUARD_ENABLED = os.environ.get("EVENT_ALIGN_GUARD_ENABLED", "true").lower() == "true"
+EVENT_ALIGN_GUARD_ENABLED = os.environ.get("EVENT_ALIGN_GUARD_ENABLED", "false").lower() == "true"
 EVENT_ALIGN_MIN_LEFT_15M = float(os.environ.get("EVENT_ALIGN_MIN_LEFT_15M", "10.0"))
 EVENT_ALIGN_MIN_MOVE_PCT = float(os.environ.get("EVENT_ALIGN_MIN_MOVE_PCT", "0.0005"))
 EVENT_ALIGN_ALLOW_SCORE = int(os.environ.get("EVENT_ALIGN_ALLOW_SCORE", "22"))
@@ -451,6 +451,10 @@ PNL_BASELINE_AUTOREPAIR_ENABLED = os.environ.get("PNL_BASELINE_AUTOREPAIR_ENABLE
 PNL_BASELINE_AUTOREPAIR_RATIO = float(os.environ.get("PNL_BASELINE_AUTOREPAIR_RATIO", "8.0"))
 PNL_BASELINE_AUTOREPAIR_MIN_ABS_USD = float(os.environ.get("PNL_BASELINE_AUTOREPAIR_MIN_ABS_USD", "25.0"))
 BUCKET_STATS_RESET_ON_BOOT = os.environ.get("BUCKET_STATS_RESET_ON_BOOT", "false").lower() == "true"
+BUCKET_SLIP_RESET_ON_BOOT = os.environ.get("BUCKET_SLIP_RESET_ON_BOOT", "true").lower() == "true"
+BUCKET_SLIP_RESET_MARKER_FILE = os.environ.get(
+    "BUCKET_SLIP_RESET_MARKER_FILE", os.path.join(_DATA_DIR, ".bucket_slip_reset_v1")
+)
 BUCKET_HARD_BLOCK_ENABLED = os.environ.get("BUCKET_HARD_BLOCK_ENABLED", "true").lower() == "true"
 BUCKET_HARD_BLOCK_MIN_OUTCOMES = int(os.environ.get("BUCKET_HARD_BLOCK_MIN_OUTCOMES", "45"))
 BUCKET_HARD_BLOCK_MAX_PF = float(os.environ.get("BUCKET_HARD_BLOCK_MAX_PF", "0.72"))
@@ -748,6 +752,7 @@ RECENT_SIDE_PRIOR_MAX_PROB_ADJ = float(os.environ.get("RECENT_SIDE_PRIOR_MAX_PRO
 RECENT_SIDE_PRIOR_MAX_EDGE_ADJ = float(os.environ.get("RECENT_SIDE_PRIOR_MAX_EDGE_ADJ", "0.010"))
 RECENT_SIDE_PRIOR_MAX_SCORE_ADJ = int(os.environ.get("RECENT_SIDE_PRIOR_MAX_SCORE_ADJ", "2"))
 ASSET_ENTRY_PRIOR_ENABLED = os.environ.get("ASSET_ENTRY_PRIOR_ENABLED", "true").lower() == "true"
+ONCHAIN_Q_ENABLED = os.environ.get("ONCHAIN_Q_ENABLED", "false").lower() == "true"
 ASSET_ENTRY_PRIOR_MIN_N = int(os.environ.get("ASSET_ENTRY_PRIOR_MIN_N", "12"))
 ASSET_ENTRY_PRIOR_LOOKBACK_H = float(os.environ.get("ASSET_ENTRY_PRIOR_LOOKBACK_H", "48"))
 ASSET_ENTRY_PRIOR_MAX_PROB_ADJ = float(os.environ.get("ASSET_ENTRY_PRIOR_MAX_PROB_ADJ", "0.018"))
@@ -1453,6 +1458,7 @@ class LiveTrader:
         self._errors            = ErrorTracker()
         self._bucket_stats      = BucketStats()
         _bs_load(self._bucket_stats)
+        self._reset_bucket_slip_once()
         self._enable_5m_runtime = bool(ENABLE_5M)
         self._five_m_runtime_size_mult = 1.0
         self._five_m_disabled_until = 0.0
@@ -7822,6 +7828,32 @@ class LiveTrader:
         if exp < 0:
             return min(0.65, MOMENTUM_WEIGHT + 0.15)
         return MOMENTUM_WEIGHT
+
+    def _reset_bucket_slip_once(self):
+        """One-shot reset of historical slippage/fill penalties."""
+        if not BUCKET_SLIP_RESET_ON_BOOT:
+            return
+        try:
+            if os.path.exists(BUCKET_SLIP_RESET_MARKER_FILE):
+                return
+        except Exception:
+            return
+        changed = 0
+        for r in self._bucket_stats.rows.values():
+            fills = int(r.get("fills", 0) or 0)
+            slip = float(r.get("slip_bps", 0.0) or 0.0)
+            if fills > 0 or abs(slip) > 1e-9:
+                r["fills"] = 0
+                r["slip_bps"] = 0.0
+                changed += 1
+        if changed > 0:
+            _bs_save(self._bucket_stats)
+            print(f"{Y}[RESET]{RS} bucket slippage reset on boot ({changed} buckets)")
+        try:
+            with open(BUCKET_SLIP_RESET_MARKER_FILE, "w", encoding="utf-8") as f:
+                f.write(datetime.now(timezone.utc).isoformat())
+        except Exception:
+            pass
 
     def _load_stats(self):
         if BUCKET_STATS_RESET_ON_BOOT:
