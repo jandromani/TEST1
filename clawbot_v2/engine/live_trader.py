@@ -5966,6 +5966,7 @@ class LiveTrader:
                 "side": str(trade.get("side", "") or ""),
                 "duration": int(trade.get("duration", 0) or 0),
                 "entry": float(trade.get("entry", 0.0) or 0.0),
+                "true_prob": float(trade.get("true_prob", 0.0) or 0.0),  # model probability at bet time
                 "source": str(trade.get("open_price_source", "?") or "?"),
                 "cl_age_s": trade.get("chainlink_age_s", None),
                 "pnl": float(pnl),
@@ -8993,23 +8994,36 @@ class LiveTrader:
         return rows
 
     def _compute_calibration(self) -> dict:
-        """0-100 calibration score from last 50 resolved 15m outcomes (persistent via SQLite)."""
+        """Proper Brier Score calibration from ALL resolved 15m outcomes (up to 2000).
+        Uses true_prob (model's actual predicted probability) when available,
+        falls back to entry price as proxy for historical samples.
+        Persistent: _resolved_samples is rebuilt from metrics.db on every boot.
+        Brier Score = mean((predicted_prob - actual_outcome)^2).
+        Perfect=0.0, random=0.25. Score = max(0, (0.25-BS)/0.25*100).
+        """
         samples = [s for s in list(self._resolved_samples) if int(s.get("duration", 0) or 0) >= 15]
         n = len(samples)
         if n < 5:
-            return {"score": 0, "n": n, "wr": 0.0}
-        recent = samples[-50:] if n > 50 else samples
-        nr = len(recent)
-        wins = sum(1 for s in recent if s.get("won"))
-        wr = wins / nr
-        wr_score = max(0.0, min(1.0, (wr - 0.50) / 0.35))          # 50%→0  85%→100
-        gross_win  = sum(abs(float(s.get("pnl", 0) or 0)) for s in recent if s.get("won"))
-        gross_loss = sum(abs(float(s.get("pnl", 0) or 0)) for s in recent if not s.get("won"))
-        pf = gross_win / max(gross_loss, 1e-9)
-        pf_score = max(0.0, min(1.0, (pf - 0.80) / 1.20))          # PF 0.8→0  2.0→100
-        n_score  = min(1.0, nr / 20.0)                               # <20 samples = partial
-        score = int((wr_score * 0.50 + pf_score * 0.30 + n_score * 0.20) * 100)
-        return {"score": score, "n": nr, "wr": round(wr * 100, 1)}
+            return {"score": 0, "n": n, "wr": 0.0, "brier": None}
+        wins = sum(1 for s in samples if s.get("won"))
+        wr   = wins / n
+        # Brier Score: use true_prob if stored, else entry as proxy
+        bs_vals = []
+        for s in samples:
+            tp = float(s.get("true_prob", 0.0) or 0.0)
+            if tp < 0.50:                          # no true_prob stored — use entry as proxy
+                tp = max(0.50, float(s.get("entry", 0.50) or 0.50))
+            outcome = 1.0 if s.get("won") else 0.0
+            bs_vals.append((tp - outcome) ** 2)
+        brier = sum(bs_vals) / len(bs_vals)
+        # Convert to 0-100: perfect(0.0)→100, random(0.25)→0
+        brier_score = max(0.0, min(1.0, (0.25 - brier) / 0.25))
+        # WR component — edge over baseline 50%
+        wr_score = max(0.0, min(1.0, (wr - 0.50) / 0.35))
+        # Sample confidence: more data = more reliable
+        n_score  = min(1.0, n / 50.0)
+        score = int((brier_score * 0.60 + wr_score * 0.25 + n_score * 0.15) * 100)
+        return {"score": score, "n": n, "wr": round(wr * 100, 1), "brier": round(brier, 4)}
 
     def _dashboard_data(self) -> dict:
         """Collect current bot state as a JSON-serialisable dict for the web dashboard."""
