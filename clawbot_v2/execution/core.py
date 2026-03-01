@@ -178,12 +178,15 @@ async def _execute_trade(self, sig: dict):
         expected_token = token_up if sig.get("side") == "Up" else (token_down if sig.get("side") == "Down" else "")
         actual_token = str(sig.get("token_id", "") or "")
         if expected_token and actual_token and expected_token != actual_token:
+            # Auto-heal side/token drift: keep side decision, realign token to side.
+            # This prevents false hard-blocks when side flips late in scoring.
+            sig["token_id"] = expected_token
+            actual_token = expected_token
             print(
-                f"{R}[SIDE-CHECK]{RS} BLOCK {sig.get('asset','?')} {sig.get('duration',0)}m "
-                f"side={sig.get('side','?')} expected_token={expected_token[:10]}.. "
-                f"actual_token={actual_token[:10]}.. cid={self._short_cid(sig.get('cid',''))}"
+                f"{Y}[SIDE-CHECK]{RS} REALIGN {sig.get('asset','?')} {sig.get('duration',0)}m "
+                f"side={sig.get('side','?')} token {actual_token[:10]}.. "
+                f"cid={self._short_cid(sig.get('cid',''))}"
             )
-            return
         if NO_GATES_MODE and HIGHPAYOUT_ONLY_NO_GATES:
             min_high_payout_entry = max(0.01, min(0.95, NO_GATES_ENTRY_MIN))
             max_high_payout_entry = max(min_high_payout_entry, min(0.95, NO_GATES_ENTRY_MAX))
