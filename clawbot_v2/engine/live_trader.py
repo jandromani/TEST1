@@ -6151,9 +6151,42 @@ class LiveTrader:
             print(f"[HIST_CALIB] {asset}: {len(asset_klines[asset])} 1m candles loaded")
 
         # ── 4. Fetch resolved Gamma events ───────────────────────────────────
+        # NOTE: Gamma API returns events OLDEST FIRST (ascending by endDate).
+        # We compute the approximate starting offset by probing the first event's
+        # date, then jumping to near cutoff_ts (900s per round = 15m intervals).
         all_rounds = []  # (asset, round_start_ts, side, won)
+        from datetime import datetime as _dt, timezone as _tz
+
+        def _parse_end_ts(ev):
+            s = str(ev.get("endDate") or ev.get("endDateIso") or "")[:19]
+            if not s:
+                return None
+            try:
+                return int(_dt.fromisoformat(s.replace("Z", "")).replace(tzinfo=_tz.utc).timestamp())
+            except Exception:
+                return None
+
         for asset, sid in _SERIES_15M.items():
-            offset = 0
+            # Step 1: find series start date from first event
+            try:
+                req = _ur.Request(
+                    f"https://gamma-api.polymarket.com/events"
+                    f"?series_id={sid}&closed=true&limit=1&offset=0",
+                    headers=_HDRS)
+                with _ur.urlopen(req, timeout=10) as r:
+                    first_page = json.loads(r.read())
+            except Exception:
+                first_page = []
+            series_start_ts = _parse_end_ts(first_page[0]) if first_page else None
+            if series_start_ts:
+                # Each round is 900s apart → estimate how many to skip
+                start_offset = max(0, int((cutoff_ts - series_start_ts) / 900) - 400)
+            else:
+                start_offset = 0
+            print(f"[HIST_CALIB] {asset}: series_start={series_start_ts}, start_offset={start_offset}")
+
+            # Step 2: page from computed offset, collect events within window
+            offset = start_offset
             while True:
                 url = (f"https://gamma-api.polymarket.com/events"
                        f"?series_id={sid}&closed=true&limit=200&offset={offset}")
@@ -6165,21 +6198,13 @@ class LiveTrader:
                     break
                 if not events:
                     break
-                stop_paging = False
                 for ev in events:
-                    end_str = str(ev.get("endDate") or ev.get("endDateIso") or "")[:19]
-                    if not end_str:
-                        continue
-                    try:
-                        from datetime import datetime as _dt, timezone as _tz
-                        end_ts = int(_dt.fromisoformat(end_str.replace("Z","")).replace(
-                            tzinfo=_tz.utc).timestamp())
-                    except Exception:
-                        continue
-                    if end_ts < cutoff_ts:
-                        stop_paging = True
-                        break
-                    round_start_ts = end_ts - 900  # 15m before close
+                    end_ts = _parse_end_ts(ev)
+                    if end_ts is None or end_ts < cutoff_ts:
+                        continue  # too old (shouldn't happen often with computed offset)
+                    if end_ts > now_ts:
+                        continue  # future
+                    round_start_ts = end_ts - 900
                     for mkt in ev.get("markets", []):
                         try:
                             op = mkt.get("outcomePrices", [])
@@ -6201,7 +6226,7 @@ class LiveTrader:
                             won = 1 if winner == side else 0
                             all_rounds.append((asset, round_start_ts, side, won))
                 offset += 200
-                if len(events) < 200 or stop_paging:
+                if len(events) < 200:
                     break
 
         print(f"[HIST_CALIB] fetched {len(all_rounds)//2} resolved rounds from Gamma")
