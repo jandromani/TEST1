@@ -1292,6 +1292,7 @@ class LiveTrader:
         self.binance_cache = {
             a: {"depth_bids": [], "depth_asks": [], "klines": [], "klines_5m": [],
                 "mark": 0.0, "index": 0.0, "funding": 0.0,
+                "agg_ts": 0.0,  # last aggTrade timestamp
                 "agg_ofi_buf": deque(maxlen=2000)}  # (ts_float, buy_qty) for rolling OFI
             for a in BNB_SYM
         }
@@ -5927,7 +5928,7 @@ class LiveTrader:
                 delay = min(delay * 2, 60)
 
     async def _stream_binance_aggtrade(self):
-        """Persistent WS: aggTrade stream for all assets → real-time OFI in binance_cache."""
+        """Persistent WS: aggTrade stream for all assets → real-time OFI + price feed (RTDS fallback)."""
         import websockets as _ws, json as _j, time as _t
         sym_map = {v: k for k, v in BNB_SYM.items()}
         streams = [f"{s}@aggTrade" for s in BNB_SYM.values()]
@@ -5936,7 +5937,7 @@ class LiveTrader:
         while True:
             try:
                 async with _ws.connect(url, ping_interval=20, ping_timeout=30, compression=None) as ws:
-                    print(f"{G}[BNB-AGG] aggTrade OFI stream connected{RS}")
+                    print(f"{G}[BNB-AGG] aggTrade stream connected (OFI + price fallback){RS}")
                     delay = 5
                     async for raw in ws:
                         msg    = _j.loads(raw)
@@ -5951,6 +5952,26 @@ class LiveTrader:
                         qty    = float(data.get("q", 0) or 0)
                         ts     = _t.time()
                         self.binance_cache[asset]["agg_ofi_buf"].append((ts, is_buy, qty))
+                        self.binance_cache[asset]["agg_ts"] = ts
+                        # ── Price feed: drive self.prices when RTDS is stale (>3s) ─────────────
+                        price = float(data.get("p", 0) or 0)
+                        if price > 0 and (ts - float(self._rtds_asset_ts.get(asset, 0.0) or 0.0)) > 3.0:
+                            self.prices[asset] = price
+                            self._rtds_asset_ts[asset] = ts
+                            self._price_src[asset] = "BNB"
+                            self.price_history[asset].append((ts, price))
+                            self._tick_update(asset, price, ts)
+                            # Event-driven evaluate (rate-limited) for unseen markets
+                            for cid, m in list(self.active_mkts.items()):
+                                if m.get("asset") != asset: continue
+                                if cid in self.seen: continue
+                                if cid not in self.open_prices: continue
+                                if ts - self._last_eval_time.get(cid, 0) < RTDS_EVAL_MIN_INTERVAL_SEC: continue
+                                mins = (m["end_ts"] - ts) / 60
+                                if mins < 1: continue
+                                self._last_eval_time[cid] = ts
+                                m_rt = dict(m); m_rt["mins_left"] = mins
+                                asyncio.create_task(self.evaluate(m_rt))
             except Exception as e:
                 print(f"{Y}[BNB-AGG] {e} — reconnect in {delay}s{RS}")
                 await asyncio.sleep(delay)
@@ -10129,6 +10150,12 @@ class LiveTrader:
         # Health
         cl_ages = {a: round(now_ts - float(self.cl_updated.get(a, 0) or 0), 1)
                    for a in ("BTC", "ETH", "SOL", "XRP")}
+        bnb_ages = {a: round(now_ts - float(self.binance_cache.get(a, {}).get("agg_ts", 0) or 0), 1)
+                    for a in ("BTC", "ETH", "SOL", "XRP")}
+        bnb_agg_ok = all(
+            (now_ts - float(self.binance_cache.get(a, {}).get("agg_ts", 0) or 0)) < 5.0
+            for a in ("BTC", "ETH")
+        )
 
         return {
             "ts": datetime.now(timezone.utc).strftime("%H:%M:%S UTC"),
@@ -10136,6 +10163,7 @@ class LiveTrader:
             "session": f"{h}h{m:02d}m",
             "network": NETWORK,
             "rtds_ok": self.rtds_ok,
+            "bnb_agg_ok": bnb_agg_ok,
             "trades": self.total, "wins": self.wins, "wr": wr,
             "pnl": round(pnl, 2), "roi": round(roi, 1),
             "usdc": round(self.onchain_usdc_balance, 2),
@@ -10145,6 +10173,7 @@ class LiveTrader:
             "total_equity": round(display_bank, 2),
             "prices": {a: round(p, 2) for a, p in self.prices.items() if p > 0},
             "cl_ages": cl_ages,
+            "bnb_ages": bnb_ages,
             "charts": charts,
             "positions": positions,
             "skip_top": skip_top,
@@ -10426,6 +10455,7 @@ function renderHeader(d){
     ['Trades',''+d.trades,'d'],
     ['Equity','$'+fmt(d.total_equity),''],
     ['RTDS',d.rtds_ok?'●':'○',d.rtds_ok?'g':'r'],
+    ['BNB',d.bnb_agg_ok?'●':'○',d.bnb_agg_ok?'g':'r'],
   ].map(([l,v,c])=>
     `<div class="hs"><div class="hsl">${l}</div><div class="hsv ${c}">${v}</div></div>`
   ).join('');
