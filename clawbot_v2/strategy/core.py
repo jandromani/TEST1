@@ -93,6 +93,10 @@ async def _score_market(self, m: dict) -> dict | None:
     pct_remaining = (mins_left * 60) / total_life if total_life > 0 else 0
     if pct_remaining < PCT_REMAINING_MIN:
         return None   # too close to close
+    if OPT_WINDOW_ENABLED and duration >= CORE_DURATION_MIN:
+        if mins_left > OPT_WINDOW_MAX_MINS or mins_left < OPT_WINDOW_MIN_MINS:
+            self._skip_tick("outside_opt_window")
+            return None
 
     # Oracle latency mode: only enter when Chainlink JUST updated in the final window.
     # Also allows contrarian tail entries early in the window (cheap tokens, mean-reversion).
@@ -334,6 +338,12 @@ async def _score_market(self, m: dict) -> dict | None:
 
     # Additional instant signals from Binance cache (zero latency)
     dw_ob     = self._ob_depth_weighted(asset)
+    # OFI EWMA: smooth over last 12 ticks (~1 min) to reduce noise
+    if not hasattr(self, '_ofi_hist'): self._ofi_hist = {}
+    _oh = self._ofi_hist.setdefault(asset, [])
+    _oh.append(dw_ob)
+    if len(_oh) > 20: _oh.pop(0)
+    if len(_oh) >= 3: dw_ob = sum(_oh[-12:]) / min(len(_oh), 12)
     autocorr  = self._autocorr_regime(asset)
     vr_ratio  = self._variance_ratio(asset)
     is_jump, jump_dir, jump_z = self._jump_detect(asset)
@@ -498,6 +508,11 @@ async def _score_market(self, m: dict) -> dict | None:
     # 1. Price displacement z-score
     if open_price > 0 and sigma_15m > 0:
         llr += (current - open_price) / open_price / sigma_15m * LLR_PRICE_MULT
+    # 1b. Brownian Bridge: amplify price signal as window closes
+    if open_price > 0 and sigma_15m > 0 and total_life > 0 and mins_left > 0:
+        _bb = min(BB_SCALE_MAX, (total_life / max(mins_left * 60, 30.0)) ** 0.5) - 1.0
+        if _bb > 0:
+            llr += (current - open_price) / open_price / sigma_15m * LLR_PRICE_MULT * _bb
     # 2. Short vs long EMA cross
     ema5  = self.emas.get(asset, {}).get(5, current)
     ema60 = self.emas.get(asset, {}).get(60, current)
@@ -570,6 +585,11 @@ async def _score_market(self, m: dict) -> dict | None:
     bias_down = self._direction_bias(asset, "Down", duration)
     # Net bias: bias_up raises P(Up), bias_down lowers P(Up) — normalize so sum=1
     prob_up   = max(0.05, min(0.95, p_up_ll + bias_up - bias_down))
+    # Platt scaling recalibration (if coeffs fitted from hist_calib)
+    _pa, _pb = getattr(self, '_platt_a', 1.0), getattr(self, '_platt_b', 0.0)
+    if _pa != 1.0 or _pb != 0.0:
+        _lg = math.log(max(1e-4, prob_up) / max(1e-4, 1.0 - prob_up))
+        prob_up = max(0.05, min(0.95, 1.0 / (1.0 + math.exp(-(_pa * _lg + _pb)))))
     prob_down = 1.0 - prob_up
 
     # Early continuation prior boost (bounded, realtime-confirmed).

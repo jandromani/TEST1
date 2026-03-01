@@ -1105,6 +1105,10 @@ OPP_EVAL_TRIGGER_ENTRY = float(os.environ.get("OPP_EVAL_TRIGGER_ENTRY", "0.58"))
 OPP_EVAL_MIN_EV_GAIN   = float(os.environ.get("OPP_EVAL_MIN_EV_GAIN",   "0.08"))  # opp must beat cur EV by ≥8%
 OPP_EVAL_MIN_OPP_ENTRY = float(os.environ.get("OPP_EVAL_MIN_OPP_ENTRY", "0.15"))  # opp token must be ≥15c (not near-resolved)
 OPP_EVAL_MAX_OPP_ENTRY = float(os.environ.get("OPP_EVAL_MAX_OPP_ENTRY", "0.55"))  # opp token must be ≤55c (payout ≥1.82x)
+BB_SCALE_MAX        = float(os.environ.get("BB_SCALE_MAX",        "2.5"))   # Brownian Bridge max time-amplification
+OPT_WINDOW_ENABLED  = os.environ.get("OPT_WINDOW_ENABLED",  "false").lower() == "true"
+OPT_WINDOW_MAX_MINS = float(os.environ.get("OPT_WINDOW_MAX_MINS", "7.5"))
+OPT_WINDOW_MIN_MINS = float(os.environ.get("OPT_WINDOW_MIN_MINS", "3.5"))
 FRESH_RELAX_MIN_LEFT_15M = float(os.environ.get("FRESH_RELAX_MIN_LEFT_15M", "4.0"))
 FRESH_RELAX_MIN_LEFT_5M = float(os.environ.get("FRESH_RELAX_MIN_LEFT_5M", "2.0"))
 FRESH_RELAX_ENTRY_CAP = float(os.environ.get("FRESH_RELAX_ENTRY_CAP", "0.90"))
@@ -1507,6 +1511,7 @@ class LiveTrader:
         self._load_settled_outcomes()
         self._bootstrap_resolved_samples_from_metrics()
         self._preload_hist_calib_from_db()   # instant load from existing DB rows
+        self._fit_platt_coeffs()
         self._init_w3()
 
     def _build_w3(self, rpc: str, timeout: int = 6):
@@ -3281,6 +3286,35 @@ class LiveTrader:
             return True, "Up" if z > 0 else "Down", z
         return False, None, z
 
+    def _fit_platt_coeffs(self):
+        """Fit Platt scaling on hist_calib: sigmoid(a*logit(true_prob)+b) vs won."""
+        try:
+            xs, ys = [], []
+            for s in self._hist_calib_samples:
+                tp = float(s.get("true_prob", 0) or 0)
+                w  = int(bool(s.get("won", 0)))
+                if 0.05 < tp < 0.95:
+                    xs.append(math.log(tp / (1.0 - tp)))
+                    ys.append(w)
+            if len(xs) < 50:
+                return
+            a, b, lr = 1.0, 0.0, 0.05
+            for _ in range(500):
+                da = db = 0.0
+                for x, y in zip(xs, ys):
+                    p = 1.0 / (1.0 + math.exp(-max(-10.0, min(10.0, a * x + b))))
+                    e = p - y
+                    da += e * x
+                    db += e
+                n = len(xs)
+                a -= lr * da / n
+                b -= lr * db / n
+            self._platt_a = max(0.2, min(4.0, a))
+            self._platt_b = max(-2.0, min(2.0, b))
+            print(f"[PLATT] a={self._platt_a:.3f} b={self._platt_b:.3f} n={len(xs)}")
+        except Exception as e:
+            print(f"[PLATT] fit failed: {e}")
+
     def _btc_lead_signal(self, asset: str) -> float:
         """P(Up) for `asset` based on BTC's 30-60s lagged move.
         For BTC itself returns 0.5 (no self-lead)."""
@@ -3303,7 +3337,15 @@ class LiveTrader:
         # Per-asset empirical BTC→altcoin lag correlation (from 15m co-window analysis)
         _btc_lag_corr = {"ETH": 0.82, "SOL": 0.80, "XRP": 0.78}
         corr = _btc_lag_corr.get(asset, 0.77)
-        return float(norm.cdf(btc_lag_move / vol_t * corr))
+        lag_p = float(norm.cdf(btc_lag_move / vol_t * corr))
+        # Fresh 5-30s window (immediate lead signal)
+        p_fresh = [(ts, p) for ts, p in hist_btc if now - 32 <= ts <= now - 3]
+        if p_fresh and p60:
+            fresh_move = (p_fresh[-1][1] - p60[-1][1]) / max(p60[-1][1], 1e-8)
+            vol_f = vol_btc * math.sqrt(57 / (252 * 24 * 3600))
+            fresh_p = float(norm.cdf(fresh_move / max(vol_f, 1e-8) * corr))
+            return (lag_p + fresh_p) / 2.0
+        return lag_p
 
     @staticmethod
     def _metrics_norm_side(v: str) -> str:
