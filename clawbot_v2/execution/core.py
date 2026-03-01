@@ -34,7 +34,7 @@ async def _execute_trade(self, sig: dict):
                 self._round_side_block_until.pop(k, None)
         if cid in self._executing_cids:
             return
-        if (not is_booster) and (cid in self.seen or len(self.pending) >= MAX_OPEN):
+        if (not is_booster) and (not NO_GATES_MODE) and (cid in self.seen or len(self.pending) >= MAX_OPEN):
             return
         if is_booster:
             if self._booster_locked():

@@ -4605,7 +4605,7 @@ class LiveTrader:
                                 now_t = _time.time()
                                 for cid, m in list(self.active_mkts.items()):
                                     if m.get("asset") != asset: continue
-                                    if cid in self.seen: continue
+                                    if (not NO_GATES_MODE) and (cid in self.seen): continue
                                     if cid not in self.open_prices: continue
                                     if now_t - self._last_eval_time.get(cid, 0) < RTDS_EVAL_MIN_INTERVAL_SEC: continue
                                     mins = (m["end_ts"] - now_t) / 60
@@ -6023,7 +6023,7 @@ class LiveTrader:
                             # Event-driven evaluate (rate-limited) for unseen markets
                             for cid, m in list(self.active_mkts.items()):
                                 if m.get("asset") != asset: continue
-                                if cid in self.seen: continue
+                                if (not NO_GATES_MODE) and (cid in self.seen): continue
                                 if cid not in self.open_prices: continue
                                 if ts - self._last_eval_time.get(cid, 0) < RTDS_EVAL_MIN_INTERVAL_SEC: continue
                                 mins = (m["end_ts"] - ts) / 60
@@ -8408,7 +8408,7 @@ class LiveTrader:
                             cur_fmt = f"{cur:,.6f}" if cur < 100 else f"{cur:,.2f}"
                             print(f"{B}[MKT] {asset} {dur}m | beat=${ref_fmt} [{src}] | "
                                   f"now=${cur_fmt} move={move:+.3f}% | {m['mins_left']:.1f}min left{RS}")
-                if cid not in self.seen:
+                if NO_GATES_MODE or (cid not in self.seen):
                     candidates.append(m)
                 else:
                     blocked_seen += 1

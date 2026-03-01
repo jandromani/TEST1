@@ -23,7 +23,7 @@ async def _score_market(self, m: dict) -> dict | None:
     cid       = m["conditionId"]
     booster_eval = False
     booster_side_locked = ""
-    if cid in self.seen:
+    if (not NO_GATES_MODE) and (cid in self.seen):
         if MID_BOOSTER_ENABLED and cid in self.pending:
             _pm, _pt = self.pending.get(cid, ({}, {}))
             _pside = str((_pt or {}).get("side", "") or "")
