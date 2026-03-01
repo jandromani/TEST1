@@ -1099,6 +1099,10 @@ ROLL_EXP_GOOD = float(os.environ.get("ROLL_EXP_GOOD", "0.10"))
 ROLL_WR_GOOD = float(os.environ.get("ROLL_WR_GOOD", "0.50"))
 ROLL_EXP_BAD = float(os.environ.get("ROLL_EXP_BAD", "-0.10"))
 ROLL_WR_BAD = float(os.environ.get("ROLL_WR_BAD", "0.46"))
+# Opposite-side eval: when forced-trend entry is too expensive, try the other side
+OPP_EVAL_ENABLED       = os.environ.get("OPP_EVAL_ENABLED", "true").lower() == "true"
+OPP_EVAL_TRIGGER_ENTRY = float(os.environ.get("OPP_EVAL_TRIGGER_ENTRY", "0.58"))  # flip when forced side > 58c
+OPP_EVAL_MIN_EV_GAIN   = float(os.environ.get("OPP_EVAL_MIN_EV_GAIN",   "0.08"))  # opp must beat cur EV by ≥8%
 FRESH_RELAX_MIN_LEFT_15M = float(os.environ.get("FRESH_RELAX_MIN_LEFT_15M", "4.0"))
 FRESH_RELAX_MIN_LEFT_5M = float(os.environ.get("FRESH_RELAX_MIN_LEFT_5M", "2.0"))
 FRESH_RELAX_ENTRY_CAP = float(os.environ.get("FRESH_RELAX_ENTRY_CAP", "0.90"))

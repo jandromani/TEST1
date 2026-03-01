@@ -1424,6 +1424,36 @@ async def _score_market(self, m: dict) -> dict | None:
             _, clob_ask, _ = pm_book_data
             live_entry = clob_ask
 
+    # ── Opposite-side fallback ────────────────────────────────────────────
+    # When price trend forces a side (e.g. all Up) but that side's CLOB entry
+    # is too expensive (>58c → payout <1.72x), check if the opposite token
+    # offers meaningfully better EV. Prevents "all Up, all blocked" deadzone.
+    if (OPP_EVAL_ENABLED and not booster_eval and duration >= CORE_DURATION_MIN
+            and live_entry > OPP_EVAL_TRIGGER_ENTRY and opp_token_id
+            and side == ("Up" if current >= open_price else "Down")):
+        _opp_bk = self._get_clob_ws_book(opp_token_id, max_age_ms=CLOB_MARKET_WS_MAX_AGE_MS)
+        if _opp_bk is None:
+            _opp_bk = await self._fetch_pm_book_safe(opp_token_id)
+        _opp_ask = (float(_opp_bk.get("best_ask", 0.0) or 0.0)
+                    if isinstance(_opp_bk, dict) else 0.0) if _opp_bk else 0.0
+        if 0.01 < _opp_ask < 0.99:
+            _opp_prob = prob_down if side == "Up" else prob_up
+            _opp_ev   = _opp_prob / max(_opp_ask, 1e-9) - 1.0
+            _cur_ev   = true_prob / max(live_entry, 1e-9) - 1.0
+            if _opp_ev > _cur_ev + OPP_EVAL_MIN_EV_GAIN:
+                opp_side = "Down" if side == "Up" else "Up"
+                if self._noisy_log_enabled(f"opp-eval:{asset}:{cid}", LOG_FLOW_EVERY_SEC):
+                    print(f"\033[96m[OPP-EVAL]\033[0m {asset} {duration}m {side}→{opp_side} "
+                          f"entry={live_entry:.3f}→{_opp_ask:.3f} "
+                          f"ev={_cur_ev:.3f}→{_opp_ev:.3f} prob={_opp_prob:.3f}")
+                side      = opp_side
+                side_up   = (side == "Up")
+                true_prob = _opp_prob
+                edge      = edge_down if side == "Down" else edge_up
+                token_id  = opp_token_id
+                pm_book_data = _opp_bk
+                live_entry   = _opp_ask
+
     # ── Entry strategy ────────────────────────────────────────────────────
     # Defensive initialization: keeps evaluate loop alive even if future
     # branches reference execution_ev before the final EV computation.
