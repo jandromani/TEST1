@@ -8992,6 +8992,25 @@ class LiveTrader:
         self._metrics_resolve_cache = {"ts": now, "sig": sig, "rows": rows, "offset": end_off, "db_rowid": db_rowid}
         return rows
 
+    def _compute_calibration(self) -> dict:
+        """0-100 calibration score from last 50 resolved 15m outcomes (persistent via SQLite)."""
+        samples = [s for s in list(self._resolved_samples) if int(s.get("duration", 0) or 0) >= 15]
+        n = len(samples)
+        if n < 5:
+            return {"score": 0, "n": n, "wr": 0.0}
+        recent = samples[-50:] if n > 50 else samples
+        nr = len(recent)
+        wins = sum(1 for s in recent if s.get("won"))
+        wr = wins / nr
+        wr_score = max(0.0, min(1.0, (wr - 0.50) / 0.35))          # 50%→0  85%→100
+        gross_win  = sum(abs(float(s.get("pnl", 0) or 0)) for s in recent if s.get("won"))
+        gross_loss = sum(abs(float(s.get("pnl", 0) or 0)) for s in recent if not s.get("won"))
+        pf = gross_win / max(gross_loss, 1e-9)
+        pf_score = max(0.0, min(1.0, (pf - 0.80) / 1.20))          # PF 0.8→0  2.0→100
+        n_score  = min(1.0, nr / 20.0)                               # <20 samples = partial
+        score = int((wr_score * 0.50 + pf_score * 0.30 + n_score * 0.20) * 100)
+        return {"score": score, "n": nr, "wr": round(wr * 100, 1)}
+
     def _dashboard_data(self) -> dict:
         """Collect current bot state as a JSON-serialisable dict for the web dashboard."""
         import time as _t
@@ -9382,6 +9401,7 @@ class LiveTrader:
             "daily_wins": d_wins,
             "daily_wr": d_wr,
             "dry_run": DRY_RUN,
+            "calibration": self._compute_calibration(),
         }
 
     async def _dashboard_loop(self):
@@ -9669,6 +9689,11 @@ function renderMetrics(d){
   const dwr=+(d.daily_wr||0),dwrc=dwr>=52?'g':dwr>=48?'y':'r';
   const l=Math.max(0,(d.trades||0)-(d.wins||0));
   const dl=Math.max(0,(d.daily_outcomes||0)-(d.daily_wins||0));
+  const cal=d.calibration||{score:0,n:0,wr:0};
+  const cs=cal.score||0;
+  const cc=cs>=70?'g':cs>=45?'y':'r';
+  const cbc=cs>=70?'var(--g)':cs>=45?'var(--y)':'var(--r)';
+  const calBar=`<div style="margin-top:4px;height:4px;background:#1e1e2e;border-radius:2px;width:100%"><div style="height:4px;border-radius:2px;width:${cs}%;background:${cbc};transition:width .4s"></div></div>`;
   document.getElementById('mbar').innerHTML=[
     ['Portfolio','$'+fmt(d.total_equity),'Free <b>$'+fmt(d.usdc)+'</b> · Open <b>'+d.open_count+'</b>'],
     ['Session P&L','<span class="'+pc+'">'+pnl(p)+'</span>','ROI <b class="'+pc+'">'+pfx(d.roi)+d.roi.toFixed(1)+'%</b>'],
@@ -9678,7 +9703,7 @@ function renderMetrics(d){
     ['Open Stake','$'+fmt(d.open_stake),'Mark <b>$'+fmt(d.open_mark)+'</b>'],
   ].map(([l,v,s])=>
     `<div class="mi"><div class="mi-l">${l}</div><div class="mi-v">${v}</div><div class="mi-s">${s}</div></div>`
-  ).join('');
+  ).join('')+`<div class="mi"><div class="mi-l">Calibration</div><div class="mi-v"><span class="${cc}">${cs}%</span></div><div class="mi-s">${calBar}<span style="font-size:.7em;opacity:.6">${cal.n} samples · WR ${cal.wr}%</span></div></div>`;
 }
 
 function drawSparkline(canvas,wp,openP,lead){
