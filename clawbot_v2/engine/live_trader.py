@@ -8420,6 +8420,11 @@ class LiveTrader:
                 if candidates:
                     self._perf_update("score_ms", elapsed_ms / max(1, len(candidates)))
                 valid   = sorted([s for s in signals if s is not None], key=lambda x: -x["score"])
+                if NO_GATES_MODE and (not valid) and candidates:
+                    forced = [self._build_forced_round_signal(m) for m in candidates]
+                    valid = sorted([s for s in forced if s is not None], key=lambda x: -x["score"])
+                    if valid and self._noisy_log_enabled("forced-coverage", 5.0):
+                        print(f"{Y}[FORCED-COVERAGE]{RS} synthesized {len(valid)} fallback signals")
                 # Force/synth fallback disabled: only real high-quality signals execute.
                 if ENABLE_5M and (not self._enable_5m_runtime) and valid and not (PROFIT_PUSH_MODE and PROFIT_PUSH_ADAPTIVE_MODE):
                     pre_n = len(valid)
@@ -8458,6 +8463,8 @@ class LiveTrader:
                 active_pending = {c: (m2, t) for c, (m2, t) in self.pending.items() if m2.get("end_ts", 0) > now}
                 shadow_pending = dict(active_pending)
                 slots = max(0, MAX_OPEN - len(active_pending))
+                if NO_GATES_MODE:
+                    slots = max(slots, min(8, len(candidates)))
                 to_exec = []
                 selected = sorted(valid, key=self._signal_growth_score, reverse=True)
                 if FORCE_TRADE_EVERY_ROUND and selected:
