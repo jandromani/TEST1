@@ -349,6 +349,16 @@ async def _score_market(self, m: dict) -> dict | None:
     if is_jump and jump_dir == direction:
         score += JUMP_CONFIRM_SCORE
 
+    # BTC direction gate: block alt bets that contradict BTC's short-term lead signal.
+    # Correlated assets (ETH 0.82, SOL 0.80, XRP 0.78) should not bet against BTC momentum.
+    if BTC_DIR_GATE_ENABLED and asset != "BTC" and duration >= 15:
+        if btc_lead_p > BTC_DIR_GATE_UP and not is_up:
+            self._skip_tick("btc_dir_gate_dn")
+            return None
+        if btc_lead_p < BTC_DIR_GATE_DN and is_up:
+            self._skip_tick("btc_dir_gate_up")
+            return None
+
     # Order book imbalance — depth-weighted 1/rank (more reliable than flat sum)
     ob_sig = dw_ob if is_up else -dw_ob    # positive = OB confirms direction
     if ob_sig < OB_HARD_BLOCK:

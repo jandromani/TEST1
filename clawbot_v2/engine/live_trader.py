@@ -1022,6 +1022,9 @@ LLR_CL_DISAGREE = float(os.environ.get("LLR_CL_DISAGREE", "1.0"))
 LLR_BTC_LEAD_MULT = float(os.environ.get("LLR_BTC_LEAD_MULT", "3.0"))
 LLR_BTC_ROUNDDISP_MULT = float(os.environ.get("LLR_BTC_ROUNDDISP_MULT", "2.0"))
 LLR_KLINE_TREND_MULT = float(os.environ.get("LLR_KLINE_TREND_MULT", "0.4"))
+BTC_DIR_GATE_ENABLED = os.environ.get("BTC_DIR_GATE_ENABLED", "true").lower() == "true"
+BTC_DIR_GATE_UP      = float(os.environ.get("BTC_DIR_GATE_UP", "0.57"))   # btc_lead_p > X → block alt Down bets
+BTC_DIR_GATE_DN      = float(os.environ.get("BTC_DIR_GATE_DN", "0.43"))   # btc_lead_p < X → block alt Up bets
 LLR_CLAMP = float(os.environ.get("LLR_CLAMP", "6.0"))
 PRIOR_BOOST_TF = float(os.environ.get("PRIOR_BOOST_TF", "0.015"))
 PRIOR_BOOST_TAKER = float(os.environ.get("PRIOR_BOOST_TAKER", "0.015"))
