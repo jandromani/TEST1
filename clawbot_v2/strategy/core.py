@@ -1332,7 +1332,14 @@ async def _score_market(self, m: dict) -> dict | None:
                         f"(n={n5} wr={wr5*100:.1f}% pf={pf5:.2f})"
                     )
     if score < min_score_local:
-        return None
+        if duration >= 15 and FORCE_TRADE_EVERY_ROUND and (not booster_eval):
+            if self._noisy_log_enabled(f"score-relax-force:{asset}:{duration}", LOG_SKIP_EVERY_SEC):
+                print(
+                    f"{Y}[SCORE-RELAX]{RS} {asset} {duration}m score={score} "
+                    f"< min={min_score_local} — force-round bypass"
+                )
+        else:
+            return None
     # Per-asset blocking for 15m
     if duration >= 15:
         asset = m.get("asset", "")
