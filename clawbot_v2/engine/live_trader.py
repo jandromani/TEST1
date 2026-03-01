@@ -6117,6 +6117,7 @@ class LiveTrader:
                 lookup[(str(asset), int(round_ts), str(side))] = tp
                 self._hist_calib_samples.append({
                     "asset":     str(asset or ""),
+                    "round_ts":  int(round_ts or 0),
                     "side":      str(side or ""),
                     "duration":  15,
                     "won":       bool(won),
@@ -6406,6 +6407,7 @@ class LiveTrader:
         for asset, side, round_ts, won, true_prob in rows:
             self._hist_calib_samples.append({
                 "asset":      str(asset or ""),
+                "round_ts":   int(round_ts or 0),
                 "side":       str(side or ""),
                 "duration":   15,
                 "won":        bool(won),
@@ -9407,10 +9409,27 @@ class LiveTrader:
         wins_live = 0
         n_live_all = len(live_all)
 
-        # Source 1: hist_calib — retrocomputed LLR→true_prob for all 15m rounds
+        # Source 1: hist_calib — evaluate only the strongest predicted side per round.
+        # hist_calib stores both sides for each round; using both would double-count
+        # and penalize the "opposite side" that the bot would never take.
+        # Keep only high-confidence picks to mirror real execution profile.
+        best_by_round = {}
         for s in hist:
             tp = float(s.get("true_prob", 0.0) or 0.0)
             if tp < 0.01:
+                continue
+            asset = str(s.get("asset", "") or "")
+            rts = int(s.get("round_ts", 0) or 0)
+            side = str(s.get("side", "") or "")
+            if not asset or rts <= 0 or side not in ("Up", "Down"):
+                continue
+            k = (asset, rts)
+            prev = best_by_round.get(k)
+            if (prev is None) or (tp > float(prev.get("true_prob", 0.0) or 0.0)):
+                best_by_round[k] = s
+        for s in best_by_round.values():
+            tp = float(s.get("true_prob", 0.0) or 0.0)
+            if tp < 0.55:
                 continue
             outcome = 1.0 if s.get("won") else 0.0
             bs_hist_vals.append((tp - outcome) ** 2)
