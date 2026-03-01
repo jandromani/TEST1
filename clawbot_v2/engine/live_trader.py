@@ -280,7 +280,7 @@ ROUND_SECOND_TRADE_MAX_ENTRY = float(os.environ.get("ROUND_SECOND_TRADE_MAX_ENTR
 ROUND_SECOND_TRADE_MAX_GSCORE_GAP = float(os.environ.get("ROUND_SECOND_TRADE_MAX_GSCORE_GAP", "0.030"))
 ROUND_FORCE_MAX_BANK_FRAC = float(os.environ.get("ROUND_FORCE_MAX_BANK_FRAC", "0.08"))
 ROUND_FORCE_MIN_NOTIONAL_MULT = float(os.environ.get("ROUND_FORCE_MIN_NOTIONAL_MULT", "1.00"))
-ROUND_FORCE_PAYOUT_CAP_15M = float(os.environ.get("ROUND_FORCE_PAYOUT_CAP_15M", "1.58"))
+ROUND_FORCE_PAYOUT_CAP_15M = float(os.environ.get("ROUND_FORCE_PAYOUT_CAP_15M", "1.40"))
 ROUND_FORCE_PAYOUT_CAP_5M = float(os.environ.get("ROUND_FORCE_PAYOUT_CAP_5M", "1.68"))
 ROUND_CONSENSUS_15M_ENABLED = os.environ.get("ROUND_CONSENSUS_15M_ENABLED", "true").lower() == "true"
 ROUND_CONSENSUS_MIN_NET = int(os.environ.get("ROUND_CONSENSUS_MIN_NET", "2"))
@@ -297,7 +297,7 @@ BLOCK_SCORE_S12P_15M  = os.environ.get("BLOCK_SCORE_S12P_15M",  "false").lower()
 SCORE_BLOCK_SOFT_MODE = os.environ.get("SCORE_BLOCK_SOFT_MODE", "true").lower() == "true"
 SCORE_BLOCK_SOFT_EDGE_PEN = float(os.environ.get("SCORE_BLOCK_SOFT_EDGE_PEN", "0.010"))
 # Profit guard: low-score 15m performs poorly in 30-50c band; keep only >50c by default.
-MIN_ENTRY_PRICE_S0_8_15M = float(os.environ.get("MIN_ENTRY_PRICE_S0_8_15M", "0.50"))  # 0=disabled
+MIN_ENTRY_PRICE_S0_8_15M = float(os.environ.get("MIN_ENTRY_PRICE_S0_8_15M", "0.00"))  # 0=disabled
 BLOCK_ASSET_SOL_15M = os.environ.get("BLOCK_ASSET_SOL_15M", "false").lower() == "true"
 BLOCK_ASSET_XRP_15M = os.environ.get("BLOCK_ASSET_XRP_15M", "false").lower() == "true"
 ASSET_BLOCK_SOFT_MODE = os.environ.get("ASSET_BLOCK_SOFT_MODE", "true").lower() == "true"
@@ -311,7 +311,7 @@ MAX_ENTRY_TOL = float(os.environ.get("MAX_ENTRY_TOL", "0.015"))
 MIN_ENTRY_PRICE_15M = float(os.environ.get("MIN_ENTRY_PRICE_15M", "0.40"))
 MIN_ENTRY_PRICE_5M = float(os.environ.get("MIN_ENTRY_PRICE_5M", "0.35"))
 MAX_ENTRY_PRICE_5M = float(os.environ.get("MAX_ENTRY_PRICE_5M", "0.52"))
-MIN_PAYOUT_MULT = float(os.environ.get("MIN_PAYOUT_MULT", "1.58"))
+MIN_PAYOUT_MULT = float(os.environ.get("MIN_PAYOUT_MULT", "1.45"))
 # Late-window payout relaxation: aligned entry in last 28% of window → lower payout OK, win rate is higher
 LATE_PAYOUT_RELAX_ENABLED   = os.environ.get("LATE_PAYOUT_RELAX_ENABLED", "true").lower() == "true"
 LATE_PAYOUT_RELAX_PCT_LEFT  = float(os.environ.get("LATE_PAYOUT_RELAX_PCT_LEFT", "0.45"))   # last 45% of window (was 0.28)
@@ -324,7 +324,7 @@ LATE_MUST_FIRE_MINS_LEFT   = float(os.environ.get("LATE_MUST_FIRE_MINS_LEFT", "1
 LATE_MUST_FIRE_SCORE_RELAX = int(os.environ.get("LATE_MUST_FIRE_SCORE_RELAX", "3"))      # lower gate by 3 pts
 LATE_MUST_FIRE_MIN_SCORE   = int(os.environ.get("LATE_MUST_FIRE_MIN_SCORE", "5"))        # absolute floor after relax
 LATE_MUST_FIRE_PROB_RELAX  = float(os.environ.get("LATE_MUST_FIRE_PROB_RELAX", "0.05")) # relax true_prob gate by this
-MIN_EV_NET = float(os.environ.get("MIN_EV_NET", "0.019"))
+MIN_EV_NET = float(os.environ.get("MIN_EV_NET", "0.008"))
 FEE_RATE_EST = float(os.environ.get("FEE_RATE_EST", "0.0156"))
 HC15_ENABLED = os.environ.get("HC15_ENABLED", "false").lower() == "true"
 HC15_MIN_SCORE = int(os.environ.get("HC15_MIN_SCORE", "10"))
@@ -453,7 +453,7 @@ PNL_BASELINE_AUTOREPAIR_MIN_ABS_USD = float(os.environ.get("PNL_BASELINE_AUTOREP
 BUCKET_STATS_RESET_ON_BOOT = os.environ.get("BUCKET_STATS_RESET_ON_BOOT", "false").lower() == "true"
 BUCKET_SLIP_RESET_ON_BOOT = os.environ.get("BUCKET_SLIP_RESET_ON_BOOT", "true").lower() == "true"
 BUCKET_SLIP_RESET_MARKER_FILE = os.environ.get(
-    "BUCKET_SLIP_RESET_MARKER_FILE", os.path.join(_DATA_DIR, ".bucket_slip_reset_v1")
+    "BUCKET_SLIP_RESET_MARKER_FILE", os.path.join(_DATA_DIR, ".bucket_slip_reset_v2")
 )
 BUCKET_HARD_BLOCK_ENABLED = os.environ.get("BUCKET_HARD_BLOCK_ENABLED", "true").lower() == "true"
 BUCKET_HARD_BLOCK_MIN_OUTCOMES = int(os.environ.get("BUCKET_HARD_BLOCK_MIN_OUTCOMES", "45"))
@@ -1039,7 +1039,7 @@ LLR_BTC_ROUNDDISP_MULT = float(os.environ.get("LLR_BTC_ROUNDDISP_MULT", "2.0"))
 LLR_KLINE_TREND_MULT  = float(os.environ.get("LLR_KLINE_TREND_MULT",  "0.4"))
 LLR_KLINE5M_MULT      = float(os.environ.get("LLR_KLINE5M_MULT",      "0.8"))   # 5m kline 1h trend
 LLR_PM_YES_MULT       = float(os.environ.get("LLR_PM_YES_MULT",       "15.0"))  # Polymarket YES price velocity
-BTC_DIR_GATE_ENABLED = os.environ.get("BTC_DIR_GATE_ENABLED", "true").lower() == "true"
+BTC_DIR_GATE_ENABLED = os.environ.get("BTC_DIR_GATE_ENABLED", "false").lower() == "true"
 BTC_DIR_GATE_UP      = float(os.environ.get("BTC_DIR_GATE_UP", "0.57"))   # btc_lead_p > X → block alt Down bets
 BTC_DIR_GATE_DN      = float(os.environ.get("BTC_DIR_GATE_DN", "0.43"))   # btc_lead_p < X → block alt Up bets
 LLR_CLAMP = float(os.environ.get("LLR_CLAMP", "6.0"))
@@ -1104,9 +1104,9 @@ ROLL_EXP_GOOD = float(os.environ.get("ROLL_EXP_GOOD", "0.10"))
 ROLL_WR_GOOD = float(os.environ.get("ROLL_WR_GOOD", "0.50"))
 ROLL_EXP_BAD = float(os.environ.get("ROLL_EXP_BAD", "-0.10"))
 ROLL_WR_BAD = float(os.environ.get("ROLL_WR_BAD", "0.46"))
-ROLL_DYN_FLOOR_BAD     = float(os.environ.get("ROLL_DYN_FLOOR_BAD",     "1.72"))
-ROLL_DYN_FLOOR_NEUTRAL = float(os.environ.get("ROLL_DYN_FLOOR_NEUTRAL", "1.62"))
-ROLL_DYN_FLOOR_GOOD    = float(os.environ.get("ROLL_DYN_FLOOR_GOOD",    "1.50"))
+ROLL_DYN_FLOOR_BAD     = float(os.environ.get("ROLL_DYN_FLOOR_BAD",     "1.55"))
+ROLL_DYN_FLOOR_NEUTRAL = float(os.environ.get("ROLL_DYN_FLOOR_NEUTRAL", "1.45"))
+ROLL_DYN_FLOOR_GOOD    = float(os.environ.get("ROLL_DYN_FLOOR_GOOD",    "1.35"))
 # Opposite-side eval: when forced-trend entry is too expensive, try the other side
 OPP_EVAL_ENABLED       = os.environ.get("OPP_EVAL_ENABLED", "true").lower() == "true"
 OPP_EVAL_TRIGGER_ENTRY = float(os.environ.get("OPP_EVAL_TRIGGER_ENTRY", "0.58"))  # flip when forced side > 58c
