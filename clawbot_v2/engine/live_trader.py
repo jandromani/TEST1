@@ -6120,8 +6120,9 @@ class LiveTrader:
 
         cutoff_ts = now_ts - fetch_days * 86400
 
-        # ── 3. Bulk fetch Binance 1m klines per asset ────────────────────────
-        print(f"{B}[HIST_CALIB]{RS} fetching {fetch_days}d Binance klines for calibration bootstrap...")
+        # ── 3. Bulk fetch Binance 5m klines per asset ────────────────────────
+        # Using 5m candles: 30d × 288 candles/d = ~8640 per asset → 9 requests vs 44 for 1m
+        print(f"{B}[HIST_CALIB]{RS} fetching {fetch_days}d Binance 5m klines...", flush=True)
         asset_klines = {}  # asset -> sorted list of (ts_ms, close)
         for asset in _SERIES_15M:
             symbol = f"{asset}USDT"
@@ -6129,7 +6130,7 @@ class LiveTrader:
             start_ms = (cutoff_ts - 1800) * 1000
             end_ms   = now_ts * 1000
             while start_ms < end_ms:
-                url = (f"{_BINANCE_KLINE}?symbol={symbol}&interval=1m"
+                url = (f"{_BINANCE_KLINE}?symbol={symbol}&interval=5m"
                        f"&startTime={int(start_ms)}&limit=1000")
                 try:
                     req = _ur.Request(url, headers=_HDRS)
@@ -6142,13 +6143,12 @@ class LiveTrader:
                 for k in batch:
                     klines_dict[int(k[0])] = float(k[4])  # open_ts_ms → close
                 last_batch_ts = int(batch[-1][0])
-                start_ms = last_batch_ts + 60_000
+                start_ms = last_batch_ts + 300_000  # 5m = 300s
                 if len(batch) < 1000:
                     break
-                _time.sleep(0.08)
-            # Sort ascending by ts
+                _time.sleep(0.05)
             asset_klines[asset] = sorted(klines_dict.items())
-            print(f"[HIST_CALIB] {asset}: {len(asset_klines[asset])} 1m candles loaded")
+            print(f"[HIST_CALIB] {asset}: {len(asset_klines[asset])} 5m candles loaded", flush=True)
 
         # ── 4. Fetch resolved Gamma events ───────────────────────────────────
         # NOTE: Gamma API returns events OLDEST FIRST (ascending by endDate).
@@ -6183,7 +6183,7 @@ class LiveTrader:
                 start_offset = max(0, int((cutoff_ts - series_start_ts) / 900) - 400)
             else:
                 start_offset = 0
-            print(f"[HIST_CALIB] {asset}: series_start={series_start_ts}, start_offset={start_offset}")
+            print(f"[HIST_CALIB] {asset}: series_start={series_start_ts}, start_offset={start_offset}", flush=True)
 
             # Step 2: page from computed offset, collect events within window
             offset = start_offset
@@ -6229,7 +6229,7 @@ class LiveTrader:
                 if len(events) < 200:
                     break
 
-        print(f"[HIST_CALIB] fetched {len(all_rounds)//2} resolved rounds from Gamma")
+        print(f"[HIST_CALIB] fetched {len(all_rounds)//2} resolved rounds from Gamma", flush=True)
 
         # ── 5. For each new round: compute LLR → true_prob → store ──────────
         # Build fast lookup: asset → list of (ts_ms, close) sorted asc
@@ -6256,36 +6256,36 @@ class LiveTrader:
                 continue  # already stored
 
             round_start_ms = round_start_ts * 1000
-            closes = _get_closes_before(asset, round_start_ms, 32)
-            if len(closes) < 8:
+            # 5m candles: use 12 bars (1h context) for trend signal
+            closes = _get_closes_before(asset, round_start_ms, 14)
+            if len(closes) < 5:
                 continue
 
-            # Compute sigma_1m from recent closes
+            # Compute sigma from 5m returns; sigma_15m = sigma_5m × sqrt(3) (15min = 3×5min)
             rets = [(closes[i] - closes[i-1]) / closes[i-1]
                     for i in range(1, len(closes)) if closes[i-1] > 0]
-            if len(rets) < 5:
+            if len(rets) < 3:
                 continue
-            sigma_1m = max((sum(r*r for r in rets) / len(rets)) ** 0.5, 1e-8)
-            sigma_15m = sigma_1m * (15 ** 0.5)
+            sigma_5m  = max((sum(r*r for r in rets) / len(rets)) ** 0.5, 1e-8)
+            sigma_15m = sigma_5m * (3 ** 0.5)  # variance scales linearly with time
 
-            # Signal 1: 30-bar 1m trend
-            n_bars = min(30, len(closes) - 1)
+            # Signal: 12-bar 5m trend (1h context)
+            n_bars = min(12, len(closes) - 1)
             c0, c1 = closes[-(n_bars+1)], closes[-1]
             if c0 <= 0 or sigma_15m <= 0:
                 continue
             ret = (c1 - c0) / c0
-            llr = ret / sigma_15m * 0.8  # LLR_KLINE_MULT
+            llr = ret / sigma_15m * 0.8
 
-            # Signal 8b: BTC displacement for alts
+            # BTC displacement for alts (30m lookback = 6 5m bars)
             if asset != "BTC":
-                btc_closes = _get_closes_before("BTC", round_start_ms, 32)
-                if len(btc_closes) >= 8:
+                btc_closes = _get_closes_before("BTC", round_start_ms, 14)
+                if len(btc_closes) >= 5:
                     btc_rets = [(btc_closes[i] - btc_closes[i-1]) / btc_closes[i-1]
                                 for i in range(1, len(btc_closes)) if btc_closes[i-1] > 0]
                     if btc_rets:
-                        btc_sigma_1m = max((sum(r*r for r in btc_rets) / len(btc_rets)) ** 0.5, 1e-8)
-                        btc_sigma15  = btc_sigma_1m * (15 ** 0.5)
-                        # BTC move over last 30m before round start
+                        btc_sigma_5m = max((sum(r*r for r in btc_rets) / len(btc_rets)) ** 0.5, 1e-8)
+                        btc_sigma15  = btc_sigma_5m * (3 ** 0.5)
                         btc_c0_30 = _get_closes_before("BTC", round_start_ms - 30*60*1000, 1)
                         btc_c1    = btc_closes[-1]
                         if btc_c0_30 and btc_c0_30[0] > 0 and btc_sigma15 > 0:
