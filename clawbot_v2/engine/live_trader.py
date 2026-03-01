@@ -736,6 +736,7 @@ HIGHPAYOUT_MIN_PAYOUT = float(os.environ.get("HIGHPAYOUT_MIN_PAYOUT", "10.0"))  
 HIGHPAYOUT_MIN_SCORE  = int(os.environ.get("HIGHPAYOUT_MIN_SCORE",  "15"))      # strong signal required
 HIGHPAYOUT_MIN_PROB   = float(os.environ.get("HIGHPAYOUT_MIN_PROB",  "0.45"))   # model must say ≥45% (vs market's ≤10%)
 HIGHPAYOUT_MIN_EDGE   = float(os.environ.get("HIGHPAYOUT_MIN_EDGE",  "0.06"))   # ≥6% execution edge
+HIGHPAYOUT_ONLY_NO_GATES = os.environ.get("HIGHPAYOUT_ONLY_NO_GATES", "true").lower() == "true"
 ROLLING_15M_CALIB_ENABLED = os.environ.get("ROLLING_15M_CALIB_ENABLED", "true").lower() == "true"
 ROLLING_15M_CALIB_MIN_N = int(os.environ.get("ROLLING_15M_CALIB_MIN_N", "20"))
 ROLLING_15M_CALIB_WINDOW = int(os.environ.get("ROLLING_15M_CALIB_WINDOW", "400"))
@@ -5304,11 +5305,26 @@ class LiveTrader:
             if current <= 0:
                 print(f"{Y}[FORCE-SYNTH-SKIP]{RS} {asset} {duration}m no current price (RTDS+CL both 0)")
                 return None
-            side = "Up" if current >= open_price else "Down"
             up_price = float(m.get("up_price", 0.5) or 0.5)
             up_price = max(0.01, min(0.99, up_price))
-            entry = up_price if side == "Up" else (1.0 - up_price)
+            dn_price = max(0.01, min(0.99, 1.0 - up_price))
+            # In no-gates fast mode, prefer high payout side (cheap token).
+            if NO_GATES_MODE and HIGHPAYOUT_ONLY_NO_GATES:
+                if up_price <= dn_price:
+                    side = "Up"
+                    entry = up_price
+                else:
+                    side = "Down"
+                    entry = dn_price
+            else:
+                side = "Up" if current >= open_price else "Down"
+                entry = up_price if side == "Up" else dn_price
+            min_high_payout_entry = 1.0 / max(1.0, HIGHPAYOUT_MIN_PAYOUT)
+            if NO_GATES_MODE and HIGHPAYOUT_ONLY_NO_GATES and entry > min_high_payout_entry:
+                return None
             max_entry_allowed = min(0.95, MAX_ENTRY_PRICE + MAX_ENTRY_TOL)
+            if NO_GATES_MODE and HIGHPAYOUT_ONLY_NO_GATES:
+                max_entry_allowed = min(max_entry_allowed, min_high_payout_entry)
             entry = max(0.01, min(max_entry_allowed, entry))
             if entry <= 0.0 or entry >= 1.0:
                 return None

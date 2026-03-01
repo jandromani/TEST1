@@ -184,6 +184,19 @@ async def _execute_trade(self, sig: dict):
                 f"actual_token={actual_token[:10]}.. cid={self._short_cid(sig.get('cid',''))}"
             )
             return
+        if NO_GATES_MODE and HIGHPAYOUT_ONLY_NO_GATES:
+            min_high_payout_entry = 1.0 / max(1.0, HIGHPAYOUT_MIN_PAYOUT)
+            sig_entry = float(sig.get("entry", 0.0) or 0.0)
+            if sig_entry <= 0.0 or sig_entry > min_high_payout_entry:
+                print(
+                    f"{Y}[SKIP]{RS} {sig.get('asset','?')} {sig.get('duration',0)}m {sig.get('side','?')} "
+                    f"entry={sig_entry:.3f} > high-payout cap={min_high_payout_entry:.3f}"
+                )
+                return
+            sig["max_entry_allowed"] = min(
+                float(sig.get("max_entry_allowed", 0.99) or 0.99),
+                min_high_payout_entry
+            )
         if self._noisy_log_enabled(f"side-check:{sig.get('asset','?')}:{sig.get('cid','')}", LOG_FLOW_EVERY_SEC):
             print(
                 f"{B}[SIDE-CHECK]{RS} OK {sig.get('asset','?')} {sig.get('duration',0)}m "
