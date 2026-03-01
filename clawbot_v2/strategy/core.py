@@ -667,6 +667,9 @@ async def _score_market(self, m: dict) -> dict | None:
     asset_entry_size_mult = 1.0
     side_up = side == "Up"
     event_align_size_mult = 1.0
+    # Save raw signal score before performance-based adjustments (RECENT-SIDE, ONCHAIN-Q, etc.)
+    # Tier blocking uses raw score so that a s12+ signal isn't demoted to s9-11 by bad run stats.
+    score_raw = score
     recent_side = up_recent if side_up else dn_recent
     recent_side_n = int(recent_side.get("n", 0) or 0)
     recent_side_exp = float(recent_side.get("exp", 0.0) or 0.0)
@@ -1330,8 +1333,9 @@ async def _score_market(self, m: dict) -> dict | None:
                 self._skip_tick("asset_blocked_sol" if asset == "SOL" else "asset_blocked_xrp")
                 return None
     # Per-tier blocking via env vars (default all off)
+    # Use score_raw (pre-adjustment) so performance penalties don't demote signal tier.
     if duration >= 15:
-        score_tier = "s12+" if score >= 12 else ("s9-11" if score >= 9 else "s0-8")
+        score_tier = "s12+" if score_raw >= 12 else ("s9-11" if score_raw >= 9 else "s0-8")
         tier_blocked = (
             (score_tier == "s0-8" and BLOCK_SCORE_S0_8_15M)
             or (score_tier == "s9-11" and BLOCK_SCORE_S9_11_15M)
