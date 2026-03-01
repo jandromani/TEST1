@@ -6025,6 +6025,7 @@ class LiveTrader:
                         "cl_age_s": cl_age_s,
                         "pnl": float(pnl or 0.0),
                         "won": str(result or "").upper() == "WIN",
+                        "round_key": str(rk or ""),
                     })
                     loaded += 1
             elif os.path.exists(METRICS_FILE):
@@ -6059,6 +6060,7 @@ class LiveTrader:
                         "cl_age_s": row.get("chainlink_age_s", None),
                         "pnl": pnl,
                         "won": bool(won),
+                        "round_key": str(row.get("round_key", "") or ""),
                     })
                     loaded += 1
             if loaded > 0:
@@ -6067,10 +6069,34 @@ class LiveTrader:
             print(f"{Y}[BOOT] resolved-sample bootstrap failed: {e}{RS}")
 
     # ── HISTORICAL CALIBRATION BOOTSTRAP ──────────────────────────────────────
+    @staticmethod
+    def _round_ts_from_key(rk: str) -> int:
+        """Parse round start timestamp from round_key: 'BTC-15m-20260101T120000Z-...'"""
+        try:
+            parts = rk.split("-")
+            if len(parts) >= 3:
+                st_str = parts[2]  # "20260101T120000Z"
+                if len(st_str) == 16 and "T" in st_str and st_str.endswith("Z"):
+                    return int(
+                        datetime.strptime(st_str, "%Y%m%dT%H%M%SZ")
+                        .replace(tzinfo=timezone.utc).timestamp()
+                    )
+        except Exception:
+            pass
+        return 0
+
     def _preload_hist_calib_from_db(self):
         """At startup: load existing hist_calib rows from DB immediately (no network fetch).
-        This makes calibration available instantly after restart.
-        The full sync (Binance + Gamma) runs later in _historical_calibration_loop.
+
+        Builds two things:
+        1. _hist_calib_samples  — all (asset, round_ts, side) rounds for the Brier pool.
+        2. _hist_calib_lookup   — {(asset, round_ts, side): true_prob} used to retroactively
+           fill true_prob for historical live bets in _resolved_samples.
+
+        Retroactive fill: for every resolved_sample that has a parseable round_key but no
+        true_prob, we look up the LLR-derived true_prob from hist_calib and store it.
+        This is the key use of historical data — it gives real signal predictions for the
+        1000+ live bets that predate true_prob persistence.
         """
         try:
             conn = sqlite3.connect(METRICS_DB_FILE, timeout=10.0)
@@ -6082,19 +6108,46 @@ class LiveTrader:
             except Exception:
                 rows = []
             conn.close()
-            if rows:
-                self._hist_calib_samples.clear()
-                for asset, side, round_ts, won, true_prob in rows:
-                    self._hist_calib_samples.append({
-                        "asset":     str(asset or ""),
-                        "side":      str(side or ""),
-                        "duration":  15,
-                        "won":       bool(won),
-                        "true_prob": float(true_prob or 0.0),
-                        "source":    "hist_calib",
-                    })
-                print(f"[BOOT] preloaded {len(self._hist_calib_samples)} hist_calib rows from DB",
-                      flush=True)
+
+            # Build lookup and samples
+            lookup = {}
+            self._hist_calib_samples.clear()
+            for asset, side, round_ts, won, true_prob in rows:
+                tp = float(true_prob or 0.0)
+                lookup[(str(asset), int(round_ts), str(side))] = tp
+                self._hist_calib_samples.append({
+                    "asset":     str(asset or ""),
+                    "side":      str(side or ""),
+                    "duration":  15,
+                    "won":       bool(won),
+                    "true_prob": tp,
+                    "source":    "hist_calib",
+                })
+            self._hist_calib_lookup = lookup
+
+            # Retroactively fill true_prob for live bets that have a round_key
+            backfilled = 0
+            for s in self._resolved_samples:
+                if float(s.get("true_prob", 0.0) or 0.0) > 0.01:
+                    continue   # already has true_prob
+                rk = str(s.get("round_key", "") or "")
+                if not rk:
+                    continue
+                rts = self._round_ts_from_key(rk)
+                if rts == 0:
+                    continue
+                asset = str(s.get("asset", "") or "")
+                side  = str(s.get("side", "") or "")
+                tp = lookup.get((asset, rts, side), 0.0)
+                if tp > 0.01:
+                    s["true_prob"] = tp
+                    backfilled += 1
+
+            print(
+                f"[BOOT] preloaded {len(self._hist_calib_samples)} hist_calib rows, "
+                f"backfilled {backfilled} live bets with retroactive true_prob",
+                flush=True
+            )
         except Exception as e:
             print(f"[BOOT] hist_calib preload failed: {e}", flush=True)
 
@@ -9363,6 +9416,9 @@ class LiveTrader:
             bs_hist_vals.append((tp - outcome) ** 2)
 
         # Source 2 + 3: live bets
+        # After _preload_hist_calib_from_db, many older bets now have true_prob
+        # backfilled from the hist_calib lookup (LLR-derived). Those go to proper.
+        # Bets still without true_prob fall back to entry-price proxy.
         n_live_proper = 0
         for s in live_all:
             if s.get("won"):
@@ -9371,12 +9427,12 @@ class LiveTrader:
             entry = float(s.get("entry", 0.0) or 0.0)
             outcome = 1.0 if s.get("won") else 0.0
 
-            if tp > 0.01 and abs(tp - entry) >= 0.002:
-                # Genuine true_prob saved from signal — highest quality
+            if tp > 0.01:
+                # Has real true_prob — either saved at bet time OR backfilled from hist
                 bs_proper_vals.append((tp - outcome) ** 2)
                 n_live_proper += 1
             elif entry > 0.01:
-                # Use entry as proxy — real bot decision, but noisy prediction
+                # No hist match and no saved true_prob — use entry as last resort
                 tp_proxy = max(0.50, min(0.95, entry))
                 bs_proxy_vals.append((tp_proxy - outcome) ** 2)
 
