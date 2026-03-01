@@ -1662,11 +1662,11 @@ async def _score_market(self, m: dict) -> dict | None:
     exec_slip_cost, exec_nofill_penalty, exec_fill_ratio = self._execution_penalties(duration, score, entry)
     execution_ev = ev_net - exec_slip_cost - exec_nofill_penalty
     if execution_ev < min_ev_req:
-        if FORCE_TRADE_EVERY_ROUND and duration >= 15 and (not booster_eval):
+        if duration >= 15 and (not booster_eval):
             if self._noisy_log_enabled(f"ev-relax-force:{asset}:{side}", LOG_SKIP_EVERY_SEC):
                 print(
                     f"{Y}[EV-RELAX]{RS} {asset} {side} exec_ev={execution_ev:.3f} "
-                    f"(min={min_ev_req:.3f}) force-round enabled"
+                    f"(min={min_ev_req:.3f}) 15m gate bypass"
                 )
         else:
             if self._noisy_log_enabled(f"skip-score-ev:{asset}:{side}", LOG_SKIP_EVERY_SEC):
