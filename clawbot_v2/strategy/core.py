@@ -697,15 +697,13 @@ async def _score_market(self, m: dict) -> dict | None:
     recent_side_score_adj = int(recent_side.get("score_adj", 0) or 0)
     recent_side_edge_adj = float(recent_side.get("edge_adj", 0.0) or 0.0)
     recent_side_prob_adj = float(recent_side.get("prob_adj", 0.0) or 0.0)
-    if recent_side_score_adj != 0 or abs(recent_side_edge_adj) > DEFAULT_EPS:
-        score += recent_side_score_adj
-        edge += recent_side_edge_adj
-        if self._noisy_log_enabled(f"recent-side:{asset}:{side}", LOG_FLOW_EVERY_SEC):
-            print(
-                f"{B}[RECENT-SIDE]{RS} {asset} {duration}m {side} "
-                f"adj(score={recent_side_score_adj:+d},edge={recent_side_edge_adj:+.3f},prob={recent_side_prob_adj:+.3f}) "
-                f"n={recent_side_n} exp={recent_side_exp:+.2f} wr_lb={recent_side_wr_lb:.2f}"
-            )
+    # Recent-side kept for diagnostics only; no direct score/edge impact.
+    if self._noisy_log_enabled(f"recent-side:{asset}:{side}", LOG_FLOW_EVERY_SEC):
+        print(
+            f"{B}[RECENT-SIDE]{RS} {asset} {duration}m {side} "
+            f"adj(score={recent_side_score_adj:+d},edge={recent_side_edge_adj:+.3f},prob={recent_side_prob_adj:+.3f}) "
+            f"n={recent_side_n} exp={recent_side_exp:+.2f} wr_lb={recent_side_wr_lb:.2f} (info-only)"
+        )
     # Asset+entry-band profile from settled on-chain outcomes.
     if ONCHAIN_Q_ENABLED:
         aq_entry = up_price if side_up else (1.0 - up_price)
