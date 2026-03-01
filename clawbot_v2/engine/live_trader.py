@@ -8230,7 +8230,7 @@ class LiveTrader:
                         f"(claimable={claimable_n}, oldest={oldest_q_min:.1f}m) "
                         f"— redeem runs in parallel; continue scanning"
                     )
-            if self._pause_entries_until > _time.time():
+            if (not NO_GATES_MODE) and self._pause_entries_until > _time.time():
                 if self._should_log("pause-entries", LOG_SETTLE_FIRST_EVERY_SEC):
                     rem_s = max(0.0, self._pause_entries_until - _time.time())
                     print(f"{Y}[PAUSE]{RS} skipping new entries for {rem_s:.0f}s (loss streak guard)")
