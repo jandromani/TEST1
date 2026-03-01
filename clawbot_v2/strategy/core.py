@@ -1631,6 +1631,16 @@ async def _score_market(self, m: dict) -> dict | None:
             # Don't miss good-payout setups: park a pullback limit at max acceptable entry.
             use_limit = True
             entry = max_entry_allowed
+        elif duration >= 15 and FORCE_TRADE_EVERY_ROUND and (not booster_eval):
+            # Last-resort execution path: do not freeze when market drifts outside entry band.
+            # Clamp to allowed band so execution layer can still try maker/taker.
+            use_limit = True
+            entry = max(min_entry_allowed, min(max_entry_allowed, live_entry))
+            if self._noisy_log_enabled(f"entry-relax-force:{asset}:{side}", LOG_SKIP_EVERY_SEC):
+                print(
+                    f"{Y}[ENTRY-RELAX]{RS} {asset} {side} live={live_entry:.3f} "
+                    f"-> clipped={entry:.3f} band=[{min_entry_allowed:.2f},{max_entry_allowed:.2f}]"
+                )
         else:
             if self._noisy_log_enabled(f"skip-score-entry:{asset}:{side}", LOG_SKIP_EVERY_SEC):
                 print(f"{Y}[SKIP] {asset} {side} entry={live_entry:.3f} outside [{min_entry_allowed:.2f},{max_entry_allowed:.2f}]{RS}")
