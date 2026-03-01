@@ -1812,6 +1812,7 @@ async def _score_market(self, m: dict) -> dict | None:
         elif mins_left <= 5.0:
             time_scale = TIME_SCALE_LATE_5_0
     raw_size   = self._kelly_size(true_prob, entry, kelly_frac)
+    calib_scale = self._calib_size_scale()
     max_single = min(MAX_SINGLE_ABS_CAP, self.bankroll * bankroll_pct)
     cid_cap    = max(MIN_HARD_CAP_USDC, self.bankroll * MAX_CID_EXPOSURE_PCT)
     hard_cap   = max(MIN_HARD_CAP_USDC, min(max_single, cid_cap, self.bankroll * MAX_BANKROLL_PCT))
@@ -1854,7 +1855,7 @@ async def _score_market(self, m: dict) -> dict | None:
     model_size = round(
         min(
             hard_cap,
-            raw_size * vol_mult * wr_scale * oracle_scale * bucket_scale * cents_scale * time_scale * leader_size_scale * asset_entry_size_mult,
+            raw_size * calib_scale * vol_mult * wr_scale * oracle_scale * bucket_scale * cents_scale * time_scale * leader_size_scale * asset_entry_size_mult,
         ),
         2,
     )

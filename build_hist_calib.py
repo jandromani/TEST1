@@ -210,7 +210,7 @@ def build(db_path: str, days: int):
     now_ts   = int(time.time())
     cutoff_ts = now_ts - days * 86400
 
-    print(f"\n=== build_hist_calib: {days} days, cutoff {datetime.utcfromtimestamp(cutoff_ts).isoformat()}Z ===\n")
+    print(f"\n=== build_hist_calib: {days} days, cutoff {datetime.fromtimestamp(cutoff_ts, tz=timezone.utc).isoformat()} ===\n")
 
     # Init DB
     conn = sqlite3.connect(db_path, timeout=30)
@@ -275,20 +275,31 @@ def build(db_path: str, days: int):
     return db_path
 
 
-# ── Upload to Northflank ───────────────────────────────────────────────────────
+# ── Upload to Northflank via bot HTTP endpoint ────────────────────────────────
 
-def upload(db_path: str):
+def _read_nf_token() -> str:
+    """Read Northflank API token from ~/.northflank/config.json."""
+    cfg_path = os.path.expanduser("~/.northflank/config.json")
+    try:
+        with open(cfg_path) as f:
+            cfg = json.load(f)
+        current = cfg.get("current", "")
+        for ctx in cfg.get("contexts", []):
+            if ctx.get("name") == current:
+                return ctx.get("token", "")
+    except Exception:
+        pass
+    return ""
+
+
+def upload(db_path: str, bot_url: str = ""):
     """
-    Export hist_calib rows as JSON and import them into Northflank via the
-    NF REST API (PATCH /v1/projects/{p}/services/{s}/env — uses custom import endpoint
-    in the bot itself at /api/import_hist_calib).
+    Export hist_calib rows as JSON and POST to the bot's /api/import_hist_calib endpoint.
+    The bot must be running and reachable at bot_url.
 
-    Simpler approach: use `nf exec` to run a python3 one-liner that reads the
-    JSON piped via stdin and writes to the remote SQLite.
+    Usage:
+        python3 build_hist_calib.py --upload --bot-url https://YOUR-BOT-URL
     """
-    import base64
-    import subprocess
-
     # Export rows to JSON
     conn = sqlite3.connect(db_path)
     rows = conn.execute(
@@ -296,52 +307,34 @@ def upload(db_path: str):
     ).fetchall()
     conn.close()
 
-    data = [{"asset": r[0], "round_ts": r[1], "side": r[2],
-             "won": r[3], "llr": r[4], "true_prob": r[5]} for r in rows]
-    payload = json.dumps(data)
-    b64 = base64.b64encode(payload.encode()).decode()
-
-    print(f"Uploading {len(rows)} rows ({len(b64)//1024} KB base64) to Northflank...")
-
-    # Python one-liner to run inside the container
-    remote_py = (
-        "import base64,json,sqlite3;"
-        "d=json.loads(base64.b64decode(open('/tmp/_hc_payload.b64').read()));"
-        "c=sqlite3.connect('/data/clawdbot_metrics.db',timeout=30);"
-        "c.execute('CREATE TABLE IF NOT EXISTS hist_calib ("
-        "id INTEGER PRIMARY KEY AUTOINCREMENT,asset TEXT NOT NULL,round_ts INTEGER NOT NULL,"
-        "side TEXT NOT NULL,won INTEGER NOT NULL,llr REAL,true_prob REAL,"
-        "created_at INTEGER DEFAULT (CAST(strftime(chr(37)+chr(115),chr(110)+chr(111)+chr(119)) AS INTEGER)),"
-        "UNIQUE(asset,round_ts,side))');"
-        "[c.execute('INSERT OR IGNORE INTO hist_calib (asset,round_ts,side,won,llr,true_prob) VALUES(?,?,?,?,?,?)',"
-        "(r['asset'],r['round_ts'],r['side'],r['won'],r['llr'],r['true_prob'])) for r in d];"
-        "c.commit();"
-        "print('imported',len(d),'rows')"
-    )
-
-    # Write b64 to /tmp on the container then exec
-    cmd_write = ["nf", "exec", "--project", NF_PROJECT, "--service", NF_SERVICE,
-                 "--", "sh", "-c", f"echo '{b64}' > /tmp/_hc_payload.b64"]
-    cmd_exec  = ["nf", "exec", "--project", NF_PROJECT, "--service", NF_SERVICE,
-                 "--", "python3", "-c", remote_py]
-
-    print("Step 1: writing payload to container /tmp ...")
-    r1 = subprocess.run(cmd_write, capture_output=True, text=True)
-    if r1.returncode != 0:
-        print(f"ERROR: {r1.stderr}")
-        print("\nManual upload alternative:")
-        print(f"  1. Copy {db_path} to a reachable URL (e.g. paste.rs, S3, etc.)")
-        print(f"  2. Set env HIST_CALIB_SEED_URL=<url> on the service")
-        print(f"  3. The bot will download and merge on next startup")
+    if not rows:
+        print("No rows to upload.")
         return
 
-    print("Step 2: running import inside container ...")
-    r2 = subprocess.run(cmd_exec, capture_output=True, text=True)
-    print(r2.stdout)
-    if r2.returncode != 0:
-        print(f"ERROR: {r2.stderr}")
-    else:
-        print("Upload complete.")
+    data = [{"asset": r[0], "round_ts": r[1], "side": r[2],
+             "won": r[3], "llr": r[4], "true_prob": r[5]} for r in rows]
+
+    if not bot_url:
+        print("ERROR: --bot-url required for upload.")
+        print("Example: python3 build_hist_calib.py --upload --bot-url https://YOUR-BOT-URL")
+        print(f"\nAlternatively, load {db_path} manually into /data/clawdbot_metrics.db on Northflank.")
+        return
+
+    url = bot_url.rstrip("/") + "/api/import_hist_calib"
+    payload = json.dumps(data).encode()
+    print(f"Uploading {len(rows)} rows ({len(payload)//1024} KB) to {url} ...")
+
+    req = urllib.request.Request(
+        url, data=payload,
+        headers={"Content-Type": "application/json", "Content-Length": str(len(payload))},
+        method="POST"
+    )
+    try:
+        with urllib.request.urlopen(req, timeout=60) as resp:
+            result = json.loads(resp.read())
+        print(f"Upload complete: {result}")
+    except Exception as e:
+        print(f"ERROR: {e}")
 
 
 # ── CLI ────────────────────────────────────────────────────────────────────────
@@ -353,20 +346,24 @@ if __name__ == "__main__":
     parser.add_argument("--db",   default="/tmp/hist_calib_local.db",
                         help="Local DB file path (default: /tmp/hist_calib_local.db)")
     parser.add_argument("--upload", action="store_true",
-                        help="Upload existing DB to Northflank (skip build)")
+                        help="Upload existing DB to bot HTTP endpoint (skip build)")
     parser.add_argument("--build-and-upload", action="store_true",
                         help="Build then upload in one step")
+    parser.add_argument("--bot-url", default="",
+                        help="Bot base URL for upload, e.g. https://YOUR-BOT-URL")
     args = parser.parse_args()
+
+    bot_url = args.bot_url
 
     if args.upload:
         if not os.path.exists(args.db):
             print(f"DB not found: {args.db}. Run without --upload first.")
             sys.exit(1)
-        upload(args.db)
+        upload(args.db, bot_url)
     elif args.build_and_upload:
         build(args.db, args.days)
-        upload(args.db)
+        upload(args.db, bot_url)
     else:
         build(args.db, args.days)
-        print("To upload to Northflank run:")
-        print(f"  python3 build_hist_calib.py --upload --db {args.db}")
+        print("To upload to the bot run:")
+        print(f"  python3 build_hist_calib.py --upload --bot-url https://YOUR-BOT-URL --db {args.db}")

@@ -7461,6 +7461,25 @@ class LiveTrader:
             return 0.90
         return 1.0
 
+    def _calib_size_scale(self) -> float:
+        """Scale Kelly size based on model calibration quality.
+
+        Uses the combined Brier Score + WR calibration score (0-100).
+        Requires at least 40 live+hist samples to activate.
+        Scale: 0.75 (score=0, random model) → 1.00 (score=100, perfect calibration).
+        Only reduces size — never increases above baseline.
+        """
+        try:
+            n_live = len(self._resolved_samples)
+            n_hist = len(self._hist_calib_samples)
+            if n_live + n_hist < 40:
+                return 1.0
+            calib = self._compute_calibration()
+            score = int(calib.get("score", 50) or 50)
+            return round(0.75 + 0.25 * (score / 100.0), 4)
+        except Exception:
+            return 1.0
+
     def _adaptive_min_edge(self) -> float:
         """CLOB edge sanity floor — keeps us from buying at obviously bad prices.
         Range: 3-8% only. Never blocks trading on its own."""
@@ -10618,7 +10637,54 @@ setInterval(pollMid,2000);
                                 content_type="application/json",
                                 headers=_NO_CACHE_HEADERS)
 
-        app = web.Application()
+        async def handle_import_hist_calib(request):
+            """POST /api/import_hist_calib — bulk-import hist_calib rows from local build script."""
+            try:
+                rows = await request.json()
+                if not isinstance(rows, list):
+                    return web.Response(text=json.dumps({"error": "expected JSON array"}),
+                                        status=400, content_type="application/json")
+                conn2 = sqlite3.connect(METRICS_DB_FILE, timeout=30)
+                conn2.execute("""
+                    CREATE TABLE IF NOT EXISTS hist_calib (
+                        id         INTEGER PRIMARY KEY AUTOINCREMENT,
+                        asset      TEXT    NOT NULL,
+                        round_ts   INTEGER NOT NULL,
+                        side       TEXT    NOT NULL,
+                        won        INTEGER NOT NULL,
+                        llr        REAL,
+                        true_prob  REAL,
+                        created_at INTEGER DEFAULT (CAST(strftime('%s','now') AS INTEGER)),
+                        UNIQUE(asset, round_ts, side)
+                    )
+                """)
+                n_new = 0
+                for r in rows:
+                    try:
+                        conn2.execute(
+                            "INSERT OR IGNORE INTO hist_calib (asset,round_ts,side,won,llr,true_prob) "
+                            "VALUES(?,?,?,?,?,?)",
+                            (r["asset"], int(r["round_ts"]), r["side"],
+                             int(r["won"]), float(r.get("llr") or 0),
+                             float(r.get("true_prob") or 0))
+                        )
+                        n_new += 1
+                    except Exception:
+                        pass
+                conn2.commit()
+                total2 = conn2.execute("SELECT COUNT(*) FROM hist_calib").fetchone()[0]
+                conn2.close()
+                # Reload into memory
+                await asyncio.to_thread(self._historical_calibration_sync, False)
+                return web.Response(
+                    text=json.dumps({"imported": n_new, "total": total2}),
+                    content_type="application/json"
+                )
+            except Exception as e:
+                return web.Response(text=json.dumps({"error": str(e)}),
+                                    status=500, content_type="application/json")
+
+        app = web.Application(client_max_size=64 * 1024 * 1024)  # 64 MB for bulk import
         app.router.add_get("/", handle_html)
         app.router.add_get("/api", handle_api)
         app.router.add_get("/daily", handle_daily)
@@ -10626,6 +10692,7 @@ setInterval(pollMid,2000);
         app.router.add_get("/dur-stats", handle_dur_stats)
         app.router.add_get("/corr", handle_corr)
         app.router.add_get("/reload-buckets", handle_reload_buckets)
+        app.router.add_post("/api/import_hist_calib", handle_import_hist_calib)
         runner = web.AppRunner(app)
         await runner.setup()
         site = web.TCPSite(runner, "0.0.0.0", port)
