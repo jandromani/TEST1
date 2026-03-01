@@ -166,9 +166,10 @@ async def _execute_trade(self, sig: dict):
                 if LOG_VERBOSE:
                     print(f"{Y}[SKIP] extreme latency {sig['asset']} signal={sig.get('signal_latency_ms', 0):.0f}ms{RS}")
                 return
-        sig = await self._maybe_wait_for_better_entry(sig)
-        if sig is None:
-            return
+        if not NO_GATES_MODE:
+            sig = await self._maybe_wait_for_better_entry(sig)
+            if sig is None:
+                return
         # Side/token integrity check before execution:
         # ensures we are sending BUY on the token corresponding to the normalized side.
         # Prefer token snapshot from signal creation time (avoids stale-m race condition)
@@ -542,13 +543,15 @@ async def _place_order(self, token_id, side, price, size_usdc, asset, duration, 
             edge_floor = min_edge_req if min_edge_req is not None else EXEC_EDGE_FLOOR_DEFAULT
             if not cl_agree:
                 edge_floor += EXEC_EDGE_FLOOR_NO_CL
+            if NO_GATES_MODE:
+                edge_floor = -1.0
             strong_exec = (
                 (score >= 12)
                 and cl_agree
                 and (taker_edge >= (edge_floor + EXEC_EDGE_STRONG_DELTA))
             )
             base_spread_cap = MAX_BOOK_SPREAD_5M if duration <= 5 else MAX_BOOK_SPREAD_15M
-            if (spread - base_spread_cap) > 1e-6 and not use_limit:
+            if (not NO_GATES_MODE) and (spread - base_spread_cap) > 1e-6 and not use_limit:
                 print(
                     f"{Y}[SKIP]{RS} {asset} {side} spread too wide: "
                     f"{spread:.3f} > cap={base_spread_cap:.3f}"
@@ -560,14 +563,14 @@ async def _place_order(self, token_id, side, price, size_usdc, asset, duration, 
                 # Edge is computed vs target, not current ask
                 limit_edge = true_prob - price
                 print(f"{B}[LIMIT]{RS} {asset} {side} target={price:.3f} limit_edge={limit_edge:.3f} ask={best_ask:.3f}")
-            elif score >= 10:
+            elif (not NO_GATES_MODE) and score >= 10:
                 # High conviction: gate on maker edge (mid price), not taker (ask)
                 if maker_edge_est < 0:
                     print(f"{Y}[SKIP] {asset} {side} [high-conv]: maker_edge={maker_edge_est:.3f} < 0 "
                           f"(mid={mid_est:.3f} model={true_prob:.3f}){RS}")
                     return None
                 print(f"{B}[EXEC-CHECK]{RS} {asset} {side} score={score} maker_edge={maker_edge_est:.3f} taker_edge={taker_edge:.3f}")
-            else:
+            elif not NO_GATES_MODE:
                 # Normal conviction: taker edge gate applies
                 if taker_edge < edge_floor:
                     kind = "disagree" if not cl_agree else "directional"
