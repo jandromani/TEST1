@@ -411,11 +411,12 @@ SCORE_DEBOUNCE_SEC = float(os.environ.get("SCORE_DEBOUNCE_SEC", "0.9"))
 RTDS_EVAL_MIN_INTERVAL_SEC = float(os.environ.get("RTDS_EVAL_MIN_INTERVAL_SEC", "1.0"))
 MARKET_REFRESH_SEC = float(os.environ.get("MARKET_REFRESH_SEC", "30.0"))  # how often to re-fetch Gamma API (was every 0.5s = 600 req/min!)
 PING_INTERVAL  = int(os.environ.get("PING_INTERVAL", "5"))
-RTDS_RECV_TIMEOUT_SEC = float(os.environ.get("RTDS_RECV_TIMEOUT_SEC", "20.0"))
-RTDS_IDLE_RECONNECT_SEC = float(os.environ.get("RTDS_IDLE_RECONNECT_SEC", "30.0"))
+RTDS_RECV_TIMEOUT_SEC = float(os.environ.get("RTDS_RECV_TIMEOUT_SEC", "75.0"))
+RTDS_IDLE_RECONNECT_SEC = float(os.environ.get("RTDS_IDLE_RECONNECT_SEC", "120.0"))
 RTDS_CONNECT_MIN_GAP_SEC = float(os.environ.get("RTDS_CONNECT_MIN_GAP_SEC", "3.0"))
 RTDS_429_BASE_BACKOFF_SEC = float(os.environ.get("RTDS_429_BASE_BACKOFF_SEC", "45.0"))
 RTDS_429_MAX_BACKOFF_SEC = float(os.environ.get("RTDS_429_MAX_BACKOFF_SEC", "900.0"))
+RTDS_ENABLE_MARKET_SUBS = str(os.environ.get("RTDS_ENABLE_MARKET_SUBS", "0")).strip().lower() in ("1", "true", "yes", "on")
 STATUS_INTERVAL= int(os.environ.get("STATUS_INTERVAL", "15"))
 ONCHAIN_SYNC_SEC = float(os.environ.get("ONCHAIN_SYNC_SEC", "2.0"))
 _DATA_DIR      = os.environ.get("DATA_DIR", os.path.expanduser("~"))
@@ -4434,17 +4435,19 @@ class LiveTrader:
                     self._rtds_last_msg_ts = _time.time()
                     print(f"{G}[RTDS] Live — streaming BTC/ETH/SOL/XRP{RS}")
 
-                    # Subscribe to active market token prices for instant up_price updates
-                    for cid, m in list(self.active_mkts.items()):
-                        for tid in [m.get("token_up",""), m.get("token_down","")]:
-                            if tid:
-                                try:
-                                    await ws.send(json.dumps({
-                                        "action": "subscribe",
-                                        "subscriptions": [{"asset_id": tid, "type": "market"}]
-                                    }))
-                                except Exception:
-                                    pass
+                    # Keep RTDS lightweight to avoid upstream throttling (429).
+                    # Token-level market subscriptions are optional and disabled by default.
+                    if RTDS_ENABLE_MARKET_SUBS:
+                        for cid, m in list(self.active_mkts.items()):
+                            for tid in [m.get("token_up", ""), m.get("token_down", "")]:
+                                if tid:
+                                    try:
+                                        await ws.send(json.dumps({
+                                            "action": "subscribe",
+                                            "subscriptions": [{"asset_id": tid, "type": "market"}]
+                                        }))
+                                    except Exception:
+                                        pass
 
                     async def pinger():
                         while True:
@@ -4456,9 +4459,11 @@ class LiveTrader:
                                     await ws.send("PING")
                                 except Exception:
                                     break
-                            # If server is silent for too long, force reconnect.
-                            if (_time.time() - float(self._rtds_last_msg_ts or 0.0)) > max(8.0, RTDS_IDLE_RECONNECT_SEC):
+                            # Force reconnect only on extended silence; avoid reconnect churn.
+                            idle_s = (_time.time() - float(self._rtds_last_msg_ts or 0.0))
+                            if idle_s > max(30.0, RTDS_IDLE_RECONNECT_SEC):
                                 try:
+                                    print(f"{Y}[RTDS]{RS} idle {idle_s:.1f}s -> reconnect", flush=True)
                                     await ws.close(code=1012, reason="rtds-idle-timeout")
                                 except Exception:
                                     pass
@@ -4497,7 +4502,7 @@ class LiveTrader:
                                         elif m.get("token_down") == tid:
                                             m["up_price"] = 1 - price
 
-                            topic = str(ev.get("topic", "") or "").lower()
+                            topic = str(ev.get("topic", "") or ev.get("type", "") or "").lower()
                             if topic not in ("crypto_prices", "crypto_prices_update", "crypto_prices_v2"):
                                 continue
                             payload = ev.get("payload", {}) or {}
