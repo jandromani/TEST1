@@ -414,8 +414,8 @@ PING_INTERVAL  = int(os.environ.get("PING_INTERVAL", "5"))
 RTDS_RECV_TIMEOUT_SEC = float(os.environ.get("RTDS_RECV_TIMEOUT_SEC", "75.0"))
 RTDS_IDLE_RECONNECT_SEC = float(os.environ.get("RTDS_IDLE_RECONNECT_SEC", "120.0"))
 RTDS_CONNECT_MIN_GAP_SEC = float(os.environ.get("RTDS_CONNECT_MIN_GAP_SEC", "3.0"))
-RTDS_429_BASE_BACKOFF_SEC = float(os.environ.get("RTDS_429_BASE_BACKOFF_SEC", "45.0"))
-RTDS_429_MAX_BACKOFF_SEC = float(os.environ.get("RTDS_429_MAX_BACKOFF_SEC", "900.0"))
+RTDS_429_BASE_BACKOFF_SEC = float(os.environ.get("RTDS_429_BASE_BACKOFF_SEC", "120.0"))
+RTDS_429_MAX_BACKOFF_SEC = float(os.environ.get("RTDS_429_MAX_BACKOFF_SEC", "3600.0"))
 RTDS_ENABLE_MARKET_SUBS = str(os.environ.get("RTDS_ENABLE_MARKET_SUBS", "0")).strip().lower() in ("1", "true", "yes", "on")
 STATUS_INTERVAL= int(os.environ.get("STATUS_INTERVAL", "15"))
 ONCHAIN_SYNC_SEC = float(os.environ.get("ONCHAIN_SYNC_SEC", "2.0"))
@@ -1307,6 +1307,7 @@ class LiveTrader:
         self.redeemed_cids   = set()  # cids already processed — prevents _redeemable_scan re-queueing
         self.token_prices    = {}     # token_id → real-time price from RTDS market stream
         self._rtds_asset_ts  = {}     # asset -> last RTDS crypto_prices tick ts
+        self._price_src = {}          # asset -> "RTDS" | "CL" | "CL-FB"
         self._rtds_ws        = None   # live WebSocket handle for dynamic subscriptions
         self._rtds_fails = 0
         self._rtds_cooldown_until = 0.0
@@ -4089,7 +4090,11 @@ class LiveTrader:
             cl_ts  = self.cl_updated.get(asset, 0)
             rtds_p = self.prices.get(asset, 0)
             rtds_ts = self._price_hist_last_ts(asset)
-            if rtds_ts > cl_ts and rtds_p > 0:
+            src_hint = str(self._price_src.get(asset, "") or "")
+            if src_hint and rtds_p > 0:
+                cur_p = rtds_p
+                cur_p_src = src_hint
+            elif rtds_ts > cl_ts and rtds_p > 0:
                 cur_p = rtds_p
                 cur_p_src = "RTDS"
             elif cl_p > 0:
@@ -4195,7 +4200,11 @@ class LiveTrader:
             cl_ts  = self.cl_updated.get(asset, 0)
             rtds_p = float(self.prices.get(asset, 0.0) or 0.0)
             rtds_ts2 = self._price_hist_last_ts(asset)
-            if rtds_ts2 > cl_ts and rtds_p > 0:
+            src_hint = str(self._price_src.get(asset, "") or "")
+            if src_hint and rtds_p > 0:
+                cur_p = rtds_p
+                cur_p_src = src_hint
+            elif rtds_ts2 > cl_ts and rtds_p > 0:
                 cur_p = rtds_p
                 cur_p_src = "RTDS"
             elif cl_p > 0:
@@ -4521,6 +4530,7 @@ class LiveTrader:
                                 self.prices[asset] = val
                                 _now_ts = _time.time()
                                 self._rtds_asset_ts[asset] = _now_ts
+                                self._price_src[asset] = "RTDS"
                                 self.price_history[asset].append((_now_ts, val))
                                 self._tick_update(asset, val, _now_ts)
                                 # Event-driven: evaluate unseen markets immediately on price tick
@@ -4629,10 +4639,12 @@ class LiveTrader:
                     if age < 60:   # only use if fresh (<60s)
                         self.cl_prices[asset]  = price
                         self.cl_updated[asset] = updated
+                        self._price_src[asset] = "CL"
                         # Dashboard fallback: if RTDS is stale, drive spot/chart from Chainlink.
                         now = _time.time()
                         if (now - float(self._rtds_asset_ts.get(asset, 0.0) or 0.0)) > 3.0:
                             self.prices[asset] = price
+                            self._price_src[asset] = "CL-FB"
                             self.price_history[asset].append((now, price))
                             self._tick_update(asset, price, now)
                 except Exception:
@@ -4673,9 +4685,11 @@ class LiveTrader:
                         if updated_at > prev_ts:   # only update if newer round
                             self.cl_prices[asset]  = price
                             self.cl_updated[asset] = updated_at
+                            self._price_src[asset] = "CL"
                             # Dashboard fallback: if RTDS is stale, drive spot/chart from Chainlink.
                             if (now - float(self._rtds_asset_ts.get(asset, 0.0) or 0.0)) > 3.0:
                                 self.prices[asset] = price
+                                self._price_src[asset] = "CL-FB"
                                 self.price_history[asset].append((now, price))
                                 self._tick_update(asset, price, now)
                             print(f"{G}[CL-WS]{RS} {asset} {price:.4f} detect={detect_lag*1000:.0f}ms "
