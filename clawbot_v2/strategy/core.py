@@ -1615,6 +1615,33 @@ async def _score_market(self, m: dict) -> dict | None:
             )
         self._skip_tick("ev_below")
         return None
+
+    # Block only deeply negative mature buckets to improve WR/PnL regime quality.
+    if duration >= 15 and (not booster_eval) and BUCKET_HARD_BLOCK_ENABLED:
+        bkey = self._bucket_key(duration, score, entry)
+        br = self._bucket_stats.rows.get(bkey)
+        if br:
+            outcomes_b = int(br.get("outcomes", 0) or 0)
+            if outcomes_b >= BUCKET_HARD_BLOCK_MIN_OUTCOMES:
+                wins_b = int(br.get("wins", 0) or 0)
+                wr_b = (wins_b / outcomes_b) if outcomes_b > 0 else 0.0
+                gw_b = float(br.get("gross_win", 0.0) or 0.0)
+                gl_b = float(br.get("gross_loss", 0.0) or 0.0)
+                if gl_b > 1e-9:
+                    pf_b = gw_b / gl_b
+                elif gw_b > 0:
+                    pf_b = 99.0
+                else:
+                    pf_b = 0.0
+                if pf_b <= BUCKET_HARD_BLOCK_MAX_PF and wr_b <= BUCKET_HARD_BLOCK_MAX_WR:
+                    if self._noisy_log_enabled(f"skip-bucket-hard:{asset}:{duration}:{bkey}", LOG_SKIP_EVERY_SEC):
+                        print(
+                            f"{Y}[BUCKET-BLOCK]{RS} {asset} {duration}m {bkey} "
+                            f"pf={pf_b:.2f} wr={wr_b*100:.1f}% n={outcomes_b}"
+                        )
+                    self._skip_tick("bucket_pf_blocked")
+                    return None
+
     if duration >= 15 and (not booster_eval) and CONSISTENCY_CORE_ENABLED:
         core_payout = 1.0 / max(entry, 1e-9)
         dyn_prob_floor = max(

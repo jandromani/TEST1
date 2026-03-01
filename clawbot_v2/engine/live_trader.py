@@ -447,7 +447,14 @@ AUTOPILOT_POLICY_FILE = os.environ.get("AUTOPILOT_POLICY_FILE", os.path.join(_DA
 PRED_AGENT_ENABLED = os.environ.get("PRED_AGENT_ENABLED", "true").lower() == "true"
 PRED_AGENT_MIN_SAMPLES = int(os.environ.get("PRED_AGENT_MIN_SAMPLES", "24"))
 PNL_BASELINE_RESET_ON_BOOT = os.environ.get("PNL_BASELINE_RESET_ON_BOOT", "false").lower() == "true"
+PNL_BASELINE_AUTOREPAIR_ENABLED = os.environ.get("PNL_BASELINE_AUTOREPAIR_ENABLED", "true").lower() == "true"
+PNL_BASELINE_AUTOREPAIR_RATIO = float(os.environ.get("PNL_BASELINE_AUTOREPAIR_RATIO", "8.0"))
+PNL_BASELINE_AUTOREPAIR_MIN_ABS_USD = float(os.environ.get("PNL_BASELINE_AUTOREPAIR_MIN_ABS_USD", "25.0"))
 BUCKET_STATS_RESET_ON_BOOT = os.environ.get("BUCKET_STATS_RESET_ON_BOOT", "false").lower() == "true"
+BUCKET_HARD_BLOCK_ENABLED = os.environ.get("BUCKET_HARD_BLOCK_ENABLED", "true").lower() == "true"
+BUCKET_HARD_BLOCK_MIN_OUTCOMES = int(os.environ.get("BUCKET_HARD_BLOCK_MIN_OUTCOMES", "45"))
+BUCKET_HARD_BLOCK_MAX_PF = float(os.environ.get("BUCKET_HARD_BLOCK_MAX_PF", "0.72"))
+BUCKET_HARD_BLOCK_MAX_WR = float(os.environ.get("BUCKET_HARD_BLOCK_MAX_WR", "0.46"))
 LOSS_STREAK_PAUSE_ENABLED = os.environ.get("LOSS_STREAK_PAUSE_ENABLED", "false").lower() == "true"
 LOSS_STREAK_PAUSE_N = int(os.environ.get("LOSS_STREAK_PAUSE_N", "3"))     # tightened 4→3
 LOSS_STREAK_PAUSE_SEC = float(os.environ.get("LOSS_STREAK_PAUSE_SEC", "1800"))  # 900→1800s
@@ -1358,6 +1365,7 @@ class LiveTrader:
         self.start_bank      = BANKROLL
         self._pnl_baseline_locked = False
         self._pnl_baseline_ts = ""
+        self._pnl_baseline_repaired = False
         self.onchain_wallet_usdc = BANKROLL
         self.onchain_open_positions = 0.0
         # Canonical aliases used by status/log renderer.
@@ -7783,6 +7791,7 @@ class LiveTrader:
         if PNL_BASELINE_RESET_ON_BOOT:
             self._pnl_baseline_locked = False
             self._pnl_baseline_ts = ""
+            self._pnl_baseline_repaired = False
             return
         try:
             with open(PNL_BASELINE_FILE, "r", encoding="utf-8") as f:
@@ -7793,10 +7802,39 @@ class LiveTrader:
                 self.start_bank = sb
                 self._pnl_baseline_locked = True
                 self._pnl_baseline_ts = ts
+                self._pnl_baseline_repaired = False
                 print(f"{B}[P&L-BASELINE]{RS} loaded on-chain baseline ${sb:.2f} ts={ts or 'n/a'}")
         except Exception:
             self._pnl_baseline_locked = False
             self._pnl_baseline_ts = ""
+            self._pnl_baseline_repaired = False
+
+    def _maybe_repair_pnl_baseline(self, total_equity: float, wallet_usdc: float):
+        """One-shot safeguard against stale/tiny baseline causing absurd ROI."""
+        if DRY_RUN or (not PNL_BASELINE_AUTOREPAIR_ENABLED):
+            return
+        if self._pnl_baseline_repaired:
+            return
+        if not self._pnl_baseline_locked:
+            return
+        sb = float(self.start_bank or 0.0)
+        te = float(total_equity or 0.0)
+        if sb <= 0.0 or te <= 0.0:
+            return
+        ratio = te / max(sb, 1e-9)
+        pnl_abs = te - sb
+        if ratio < PNL_BASELINE_AUTOREPAIR_RATIO:
+            return
+        if pnl_abs < PNL_BASELINE_AUTOREPAIR_MIN_ABS_USD:
+            return
+        self.start_bank = te
+        self._pnl_baseline_ts = datetime.now(timezone.utc).isoformat()
+        self._pnl_baseline_repaired = True
+        self._save_pnl_baseline(te, wallet_usdc)
+        print(
+            f"{Y}[P&L-BASELINE-REPAIR]{RS} stale baseline auto-repaired "
+            f"${sb:.2f} -> ${te:.2f} (ratio={ratio:.1f}x)"
+        )
 
     def _save_pnl_baseline(self, total_equity: float, wallet_usdc: float):
         try:
@@ -8767,6 +8805,8 @@ class LiveTrader:
                             f"{B}[P&L-BASELINE]{RS} set on-chain baseline=${total:.2f} "
                             f"at {self._pnl_baseline_ts}"
                         )
+                    else:
+                        self._maybe_repair_pnl_baseline(total, usdc)
 
                 # 3. API recovery/stats only (does not drive bankroll valuation)
                 api_active_cids = set()
