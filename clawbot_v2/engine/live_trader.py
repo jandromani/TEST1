@@ -1138,7 +1138,7 @@ ENTRY_TIGHTEN_ADD = float(os.environ.get("ENTRY_TIGHTEN_ADD", "0.01"))
 PULLBACK_MIN_ENTRY_FLOOR = float(os.environ.get("PULLBACK_MIN_ENTRY_FLOOR", "0.10"))
 FORCE_TAKER_CL_AGE_FRESH = float(os.environ.get("FORCE_TAKER_CL_AGE_FRESH", "45"))
 FIVE_MIN_ASSETS = {
-    s.strip().upper() for s in os.environ.get("FIVE_MIN_ASSETS", "BTC,ETH").split(",") if s.strip()
+    s.strip().upper() for s in os.environ.get("FIVE_MIN_ASSETS", "BTC,ETH,SOL,XRP").split(",") if s.strip()
 }
 
 if PROFIT_PUSH_MODE:
