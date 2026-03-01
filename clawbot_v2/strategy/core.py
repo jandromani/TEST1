@@ -40,6 +40,9 @@ async def _score_market(self, m: dict) -> dict | None:
     duration  = m["duration"]
     mins_left = m["mins_left"]
     up_price  = m["up_price"]
+    # Track Polymarket YES token price history (crowd sentiment signal)
+    _pm_h = self._pm_price_hist.setdefault(cid, deque(maxlen=40))
+    _pm_h.append((_time.time(), up_price))
     label     = f"{asset} {duration}m | {m.get('question','')[:45]}"
     # Pre-fetch likely token book (cheap-side = token_up iff up_price≤0.50)
     prefetch_token = m.get("token_up", "") if up_price <= PREFETCH_UP_PRICE_MAX else m.get("token_down", "")
@@ -539,8 +542,26 @@ async def _score_market(self, m: dict) -> dict | None:
         if _c0 > 0:
             _kl_ret = (_c1 - _c0) / _c0
             llr += _kl_ret / (sigma_15m * (20 / 15) ** 0.5) * LLR_KLINE_TREND_MULT
-    # 10. Regime scale
-    llr *= regime_mult
+    # 10. 5m kline trend — 1 hour of context (12 × 5m candles)
+    _klines5 = (self.binance_cache.get(asset, {}) or {}).get("klines_5m", [])
+    if len(_klines5) >= 4 and sigma_15m > 0:
+        _n5 = min(12, len(_klines5) - 1)
+        _c5_0 = float(_klines5[-_n5 - 1][4])
+        _c5_1 = float(_klines5[-1][4])
+        if _c5_0 > 0:
+            _kl5_ret = (_c5_1 - _c5_0) / _c5_0
+            llr += _kl5_ret / (sigma_15m * (60 / 15) ** 0.5) * LLR_KLINE5M_MULT
+    # 11. Polymarket YES token price velocity (crowd sentiment shift within round)
+    _pm_vel = 0.0
+    _pm_ph  = self._pm_price_hist.get(cid)
+    if _pm_ph and len(_pm_ph) >= 3:
+        _now_ts = _time.time()
+        _old = next((p for ts, p in reversed(list(_pm_ph)) if _now_ts - ts >= 60), None)
+        if _old is not None:
+            _pm_vel = up_price - _old   # positive = crowd moving toward Up
+    llr += _pm_vel * LLR_PM_YES_MULT
+    # 12. Regime scale
+    llr *= regime_mult  # noqa: applied after all additive signals
     # Sigmoid → prob_up
     p_up_ll   = 1.0 / (1.0 + math.exp(-max(-LLR_CLAMP, min(LLR_CLAMP, llr))))
     # Structural tie bias: resolution uses >= so exact CL tie resolves as Up

@@ -1021,7 +1021,9 @@ LLR_CL_AGREE = float(os.environ.get("LLR_CL_AGREE", "0.4"))
 LLR_CL_DISAGREE = float(os.environ.get("LLR_CL_DISAGREE", "1.0"))
 LLR_BTC_LEAD_MULT = float(os.environ.get("LLR_BTC_LEAD_MULT", "3.0"))
 LLR_BTC_ROUNDDISP_MULT = float(os.environ.get("LLR_BTC_ROUNDDISP_MULT", "2.0"))
-LLR_KLINE_TREND_MULT = float(os.environ.get("LLR_KLINE_TREND_MULT", "0.4"))
+LLR_KLINE_TREND_MULT  = float(os.environ.get("LLR_KLINE_TREND_MULT",  "0.4"))
+LLR_KLINE5M_MULT      = float(os.environ.get("LLR_KLINE5M_MULT",      "0.8"))   # 5m kline 1h trend
+LLR_PM_YES_MULT       = float(os.environ.get("LLR_PM_YES_MULT",       "15.0"))  # Polymarket YES price velocity
 BTC_DIR_GATE_ENABLED = os.environ.get("BTC_DIR_GATE_ENABLED", "true").lower() == "true"
 BTC_DIR_GATE_UP      = float(os.environ.get("BTC_DIR_GATE_UP", "0.57"))   # btc_lead_p > X → block alt Down bets
 BTC_DIR_GATE_DN      = float(os.environ.get("BTC_DIR_GATE_DN", "0.43"))   # btc_lead_p < X → block alt Up bets
@@ -1278,7 +1280,7 @@ class LiveTrader:
         self.vols        = {"BTC": 0.65, "ETH": 0.80, "SOL": 1.20, "XRP": 0.90}
         # Binance WS cache — populated by _stream_binance_* loops, read by _binance_* helpers
         self.binance_cache = {
-            a: {"depth_bids": [], "depth_asks": [], "klines": [],
+            a: {"depth_bids": [], "depth_asks": [], "klines": [], "klines_5m": [],
                 "mark": 0.0, "index": 0.0, "funding": 0.0,
                 "agg_ofi_buf": deque(maxlen=2000)}  # (ts_float, buy_qty) for rolling OFI
             for a in BNB_SYM
@@ -1401,6 +1403,7 @@ class LiveTrader:
         self.recent_pnl      = deque(maxlen=40)   # rolling pnl window for profit-factor/expectancy adaptation
         self._resolved_samples = deque(maxlen=2000)  # rolling settled outcomes for 15m calibration
         self._pm_pattern_stats = {}
+        self._pm_price_hist  = {}   # cid → deque(maxlen=40) of (ts, up_price) — YES token velocity
         self.side_perf       = {}                 # "ASSET|SIDE" -> {n, gross_win, gross_loss, pnl}
         self._last_eval_time    = {}              # cid → last RTDS-triggered evaluate() timestamp
         self._score_cache_by_key = {}             # cid -> {"ts","fp","sig"}
@@ -5664,6 +5667,11 @@ class LiveTrader:
                     params={"symbol": s, "interval": "1m", "limit": 33}, timeout=5).json())
                 if isinstance(klines, list):
                     self.binance_cache[asset]["klines"] = klines
+                klines5 = await loop.run_in_executor(None, lambda s=sym_api: _req.get(
+                    "https://api.binance.com/api/v3/klines",
+                    params={"symbol": s, "interval": "5m", "limit": 24}, timeout=5).json())
+                if isinstance(klines5, list):
+                    self.binance_cache[asset]["klines_5m"] = klines5
             except Exception as e:
                 self._errors.tick("bnb_seed_klines", print, err=e, every=25)
             try:
@@ -5681,7 +5689,7 @@ class LiveTrader:
         """Persistent WS: depth20 + kline_1m for all assets → binance_cache."""
         import websockets as _ws, json as _j
         sym_map = {v: k for k, v in BNB_SYM.items()}  # "btcusdt" → "BTC"
-        streams = [f"{s}@depth20@100ms/{s}@kline_1m" for s in BNB_SYM.values()]
+        streams = [f"{s}@depth20@100ms/{s}@kline_1m/{s}@kline_5m" for s in BNB_SYM.values()]
         url = "wss://stream.binance.com/stream?streams=" + "/".join(streams)
         delay = 5
         while True:
@@ -5713,6 +5721,18 @@ class LiveTrader:
                                 klines.append(kline)
                                 if len(klines) > 33:
                                     klines.pop(0)
+                        elif "@kline_5m" in stream:
+                            k = data.get("k", {})
+                            kline = [k.get("t",0), k.get("o","0"), k.get("h","0"),
+                                     k.get("l","0"), k.get("c","0"), k.get("v","0"),
+                                     0, 0, 0, k.get("V","0"), 0, 0]
+                            klines5 = c["klines_5m"]
+                            if klines5 and klines5[-1][0] == kline[0]:
+                                klines5[-1] = kline
+                            else:
+                                klines5.append(kline)
+                                if len(klines5) > 24:
+                                    klines5.pop(0)
             except Exception as e:
                 print(f"{Y}[BNB-SPOT] {e} — reconnect in {delay}s{RS}")
                 await asyncio.sleep(delay)
