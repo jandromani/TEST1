@@ -21,6 +21,9 @@ async def _score_market(self, m: dict) -> dict | None:
     Pure analysis — no side effects, no order placement."""
     score_started = _time.perf_counter()
     cid       = m["conditionId"]
+    duration  = int(m.get("duration", 0) or 0)
+    if ONLY_5M_MODE and duration != 5:
+        return None
     booster_eval = False
     booster_side_locked = ""
     if (not NO_GATES_MODE) and (cid in self.seen):

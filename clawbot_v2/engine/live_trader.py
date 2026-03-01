@@ -639,6 +639,7 @@ NEXT_MARKET_ANALYSIS_MIN_CONF = float(os.environ.get("NEXT_MARKET_ANALYSIS_MIN_C
 # Default: keep 5m enabled unless explicitly disabled.
 FORCE_DISABLE_5M = os.environ.get("FORCE_DISABLE_5M", "false").lower() == "true"
 ENABLE_5M = (os.environ.get("ENABLE_5M", "true").lower() == "true") and (not FORCE_DISABLE_5M)
+ONLY_5M_MODE = os.environ.get("ONLY_5M_MODE", "true").lower() == "true"
 FIVE_M_RUNTIME_GUARD_ENABLED = os.environ.get("FIVE_M_RUNTIME_GUARD_ENABLED", "false").lower() == "true"
 FIVE_M_GUARD_WINDOW = int(os.environ.get("FIVE_M_GUARD_WINDOW", "20"))
 FIVE_M_GUARD_DISABLE_MIN_OUTCOMES = int(os.environ.get("FIVE_M_GUARD_DISABLE_MIN_OUTCOMES", "12"))
@@ -5296,6 +5297,8 @@ class LiveTrader:
                 return None
             asset = str(m.get("asset", "") or "")
             duration = int(m.get("duration", 0) or 0)
+            if ONLY_5M_MODE and duration != 5:
+                return None
             mins_left = float(m.get("mins_left", 0.0) or 0.0)
             if mins_left <= 0.5:
                 return None
@@ -8432,6 +8435,8 @@ class LiveTrader:
                             cur_fmt = f"{cur:,.6f}" if cur < 100 else f"{cur:,.2f}"
                             print(f"{B}[MKT] {asset} {dur}m | beat=${ref_fmt} [{src}] | "
                                   f"now=${cur_fmt} move={move:+.3f}% | {m['mins_left']:.1f}min left{RS}")
+                if ONLY_5M_MODE and int(m.get("duration", 0) or 0) != 5:
+                    continue
                 if NO_GATES_MODE or (cid not in self.seen):
                     candidates.append(m)
                 else:
