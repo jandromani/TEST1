@@ -963,17 +963,11 @@ async def _place_order(self, token_id, side, price, size_usdc, asset, duration, 
                     # Non-core fallback can relax slightly to preserve executable flow.
                     min_payout_fb = max(1.65, min_payout_fb - 0.08)
                 if fresh_payout < min_payout_fb:
-                    if fresh_payout >= max(1.0, (min_payout_fb - PAYOUT_NEAR_MISS_TOL)):
-                        if self._noisy_log_enabled(f"payout-near-miss-fb:{asset}:{side}", LOG_SKIP_EVERY_SEC):
-                            print(
-                                f"{Y}[PAYOUT-TOL]{RS} {asset} {side} fallback payout={fresh_payout:.2f}x "
-                                f"near min={min_payout_fb:.2f}x (tol={PAYOUT_NEAR_MISS_TOL:.2f}x)"
-                            )
-                    else:
-                        print(f"{Y}[SKIP] {asset} {side} fallback payout={fresh_payout:.2f}x < min={min_payout_fb:.2f}x{RS}")
-                        self._skip_tick("fallback_payout_below")
-                        print(f"{Y}[EXEC-RESULT]{RS} {asset} {side} no-fill reason=fallback_payout_below")
-                        return None
+                    if self._noisy_log_enabled(f"payout-info-fb:{asset}:{side}", LOG_SKIP_EVERY_SEC):
+                        print(
+                            f"{Y}[PAYOUT-INFO]{RS} {asset} {side} fallback payout={fresh_payout:.2f}x "
+                            f"< target={min_payout_fb:.2f}x (non-blocking)"
+                        )
                 fresh_ep  = true_prob - fresh_ask
                 if fresh_ep < edge_floor:
                     print(f"{Y}[SKIP] {asset} {side} taker: fresh ask={fresh_ask:.3f} edge={fresh_ep:.3f} < {edge_floor:.2f} — price moved against us{RS}")
