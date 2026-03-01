@@ -1489,6 +1489,7 @@ class LiveTrader:
         self._load_pnl_baseline()
         self._load_settled_outcomes()
         self._bootstrap_resolved_samples_from_metrics()
+        self._preload_hist_calib_from_db()   # instant load from existing DB rows
         self._init_w3()
 
     def _build_w3(self, rpc: str, timeout: int = 6):
@@ -6066,6 +6067,37 @@ class LiveTrader:
             print(f"{Y}[BOOT] resolved-sample bootstrap failed: {e}{RS}")
 
     # ── HISTORICAL CALIBRATION BOOTSTRAP ──────────────────────────────────────
+    def _preload_hist_calib_from_db(self):
+        """At startup: load existing hist_calib rows from DB immediately (no network fetch).
+        This makes calibration available instantly after restart.
+        The full sync (Binance + Gamma) runs later in _historical_calibration_loop.
+        """
+        try:
+            conn = sqlite3.connect(METRICS_DB_FILE, timeout=10.0)
+            try:
+                rows = conn.execute(
+                    "SELECT asset, side, round_ts, won, true_prob "
+                    "FROM hist_calib ORDER BY round_ts ASC"
+                ).fetchall()
+            except Exception:
+                rows = []
+            conn.close()
+            if rows:
+                self._hist_calib_samples.clear()
+                for asset, side, round_ts, won, true_prob in rows:
+                    self._hist_calib_samples.append({
+                        "asset":     str(asset or ""),
+                        "side":      str(side or ""),
+                        "duration":  15,
+                        "won":       bool(won),
+                        "true_prob": float(true_prob or 0.0),
+                        "source":    "hist_calib",
+                    })
+                print(f"[BOOT] preloaded {len(self._hist_calib_samples)} hist_calib rows from DB",
+                      flush=True)
+        except Exception as e:
+            print(f"[BOOT] hist_calib preload failed: {e}", flush=True)
+
     def _historical_calibration_sync(self, full_refetch: bool = False):
         """Download historical Polymarket 15m rounds + Binance klines, compute LLR signals,
         store in hist_calib table, load into _hist_calib_samples for Brier Score calibration.
