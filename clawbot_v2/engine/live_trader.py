@@ -659,6 +659,7 @@ FIVE_M_DYNAMIC_SCORE_ADD_BAD = int(os.environ.get("FIVE_M_DYNAMIC_SCORE_ADD_BAD"
 FIVE_M_DYNAMIC_SCORE_ADD_WORSE = int(os.environ.get("FIVE_M_DYNAMIC_SCORE_ADD_WORSE", "3"))
 ORDER_FAST_MODE = os.environ.get("ORDER_FAST_MODE", "true").lower() == "true"
 ALWAYS_LIMIT_FOK_EXEC = os.environ.get("ALWAYS_LIMIT_FOK_EXEC", "true").lower() == "true"
+NO_GATES_MODE = os.environ.get("NO_GATES_MODE", "true").lower() == "true"
 MAKER_POLL_5M_SEC = float(os.environ.get("MAKER_POLL_5M_SEC", "0.15"))
 MAKER_POLL_15M_SEC = float(os.environ.get("MAKER_POLL_15M_SEC", "0.25"))
 MAKER_WAIT_5M_SEC = float(os.environ.get("MAKER_WAIT_5M_SEC", "0.30"))
@@ -8528,15 +8529,17 @@ class LiveTrader:
                             f"(up={up_votes} down={dn_votes} net={net} move={(move_sum*100):+.3f}%)"
                         )
                 blackout_ev = self._macro_blackout_active()
-                if blackout_ev:
+                if blackout_ev and (not NO_GATES_MODE):
                     if self._should_log("macro-blackout", 120):
                         print(f"{Y}[MACRO-BLACKOUT]{RS} skipping trades — {blackout_ev} event window active")
                 for sig in selected:
                     if len(to_exec) >= slots:
                         break
-                    if blackout_ev:
+                    if blackout_ev and (not NO_GATES_MODE):
                         continue
                     if (
+                        (not NO_GATES_MODE)
+                        and
                         consensus_side_15m
                         and int(sig.get("duration", 0) or 0) >= 15
                         and str(sig.get("side", "") or "") != consensus_side_15m
@@ -8552,9 +8555,9 @@ class LiveTrader:
                             if not over:
                                 self._skip_tick("consensus_contra")
                                 continue
-                    if not self._exposure_ok(sig, shadow_pending):
+                    if (not NO_GATES_MODE) and (not self._exposure_ok(sig, shadow_pending)):
                         continue
-                    if not TRADE_ALL_MARKETS:
+                    if (not NO_GATES_MODE) and (not TRADE_ALL_MARKETS):
                         pending_up = sum(1 for _, t in shadow_pending.values() if t.get("side") == "Up")
                         pending_dn = sum(1 for _, t in shadow_pending.values() if t.get("side") == "Down")
                         if sig["side"] == "Up" and pending_up >= MAX_SAME_DIR:

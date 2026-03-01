@@ -117,6 +117,8 @@ async def _execute_trade(self, sig: dict):
                 )
             return
         if (
+            (not NO_GATES_MODE)
+            and
             LATE_DIR_LOCK_ENABLED
             and duration in (5, 15)
             and sig.get("open_price", 0) > 0
@@ -142,7 +144,7 @@ async def _execute_trade(self, sig: dict):
             extra_score_gate = max(extra_score_gate, EXTRA_SCORE_GATE_BTC_5M)
         if sig.get("asset") == "XRP" and duration > 5:
             extra_score_gate = max(extra_score_gate, EXTRA_SCORE_GATE_XRP_15M)
-        if extra_score_gate > 0:
+        if (not NO_GATES_MODE) and extra_score_gate > 0:
             base_gate = MIN_SCORE_GATE_5M if duration <= 5 else MIN_SCORE_GATE_15M
             req_score = base_gate + extra_score_gate
             if float(sig.get("score", 0.0) or 0.0) < req_score:
@@ -152,13 +154,13 @@ async def _execute_trade(self, sig: dict):
                         f"score={sig.get('score', 0):.0f} < req={req_score:.0f}"
                     )
                 return
-        if sig.get("quote_age_ms", 0) > MAX_QUOTE_STALENESS_MS:
+        if (not NO_GATES_MODE) and sig.get("quote_age_ms", 0) > MAX_QUOTE_STALENESS_MS:
             # Soft gate: keep trading unless quote is extremely stale.
             if sig.get("quote_age_ms", 0) > MAX_QUOTE_STALENESS_MS * 3:
                 if LOG_VERBOSE:
                     print(f"{Y}[SKIP] very stale quote {sig['asset']} age={sig.get('quote_age_ms', 0):.0f}ms{RS}")
                 return
-        if sig.get("signal_latency_ms", 0) > MAX_SIGNAL_LATENCY_MS:
+        if (not NO_GATES_MODE) and sig.get("signal_latency_ms", 0) > MAX_SIGNAL_LATENCY_MS:
             # Soft gate: keep coverage unless decision latency is extreme.
             if sig.get("signal_latency_ms", 0) > MAX_SIGNAL_LATENCY_MS * 2:
                 if LOG_VERBOSE:
