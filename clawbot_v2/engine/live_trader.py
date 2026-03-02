@@ -417,6 +417,8 @@ RTDS_CONNECT_MIN_GAP_SEC = float(os.environ.get("RTDS_CONNECT_MIN_GAP_SEC", "3.0
 RTDS_429_BASE_BACKOFF_SEC = float(os.environ.get("RTDS_429_BASE_BACKOFF_SEC", "120.0"))
 RTDS_429_MAX_BACKOFF_SEC = float(os.environ.get("RTDS_429_MAX_BACKOFF_SEC", "3600.0"))
 RTDS_ENABLE_MARKET_SUBS = str(os.environ.get("RTDS_ENABLE_MARKET_SUBS", "0")).strip().lower() in ("1", "true", "yes", "on")
+RTDS_ENABLE_CHAINLINK = str(os.environ.get("RTDS_ENABLE_CHAINLINK", "0")).strip().lower() in ("1", "true", "yes", "on")
+FEE_RATE_CACHE_TTL_SEC = float(os.environ.get("FEE_RATE_CACHE_TTL_SEC", "900"))
 STATUS_INTERVAL= int(os.environ.get("STATUS_INTERVAL", "15"))
 ONCHAIN_SYNC_SEC = float(os.environ.get("ONCHAIN_SYNC_SEC", "2.0"))
 _DATA_DIR      = os.environ.get("DATA_DIR", os.path.expanduser("~"))
@@ -1350,6 +1352,7 @@ class LiveTrader:
         self._rtds_last_msg_ts = 0.0
         self._rtds_last_connect_try_ts = 0.0
         self._rtds_ping_task = None
+        self._fee_rate_cache = {}  # token_id -> {"fee_rate_param": float, "ts": float}
         self._redeem_queued_ts = {}  # cid → timestamp when queued for redeem
         self._redeem_verify_counts = {}  # cid → non-claimable verification cycles before auto-close
         self._pending_absent_counts = {}  # cid -> consecutive sync cycles absent from on-chain/API
@@ -4511,13 +4514,11 @@ class LiveTrader:
                     compression=None,
                 ) as ws:
                     # RTDS spec: subscribe using explicit topic/type pairs.
-                    await ws.send(json.dumps({
-                        "action": "subscribe",
-                        "subscriptions": [
-                            {"topic": "crypto_prices", "type": "update"},
-                            {"topic": "crypto_prices_chainlink", "type": "*", "filters": ""},
-                        ]
-                    }))
+                    # Keep default light (Binance-only) to reduce 429 reconnect churn.
+                    subs = [{"topic": "crypto_prices", "type": "update"}]
+                    if RTDS_ENABLE_CHAINLINK:
+                        subs.append({"topic": "crypto_prices_chainlink", "type": "*", "filters": ""})
+                    await ws.send(json.dumps({"action": "subscribe", "subscriptions": subs}))
                     self.rtds_ok = True
                     self._rtds_ws = ws   # expose for dynamic market subscriptions
                     self._rtds_fails = 0
@@ -5314,6 +5315,53 @@ class LiveTrader:
             }
         except Exception:
             return None
+
+    async def _get_token_fee_rate_param(self, token_id: str) -> float:
+        """Get fee-rate parameter for token from CLOB `/fee-rate`.
+        Returns fee-rate parameter in ratio form (e.g. 0.25 for crypto), cached by token.
+        """
+        tid = str(token_id or "").strip()
+        if not tid:
+            return 0.0
+        now = _time.time()
+        cached = self._fee_rate_cache.get(tid)
+        if cached:
+            age = now - float(cached.get("ts", 0.0) or 0.0)
+            if age <= max(60.0, FEE_RATE_CACHE_TTL_SEC):
+                return float(cached.get("fee_rate_param", 0.0) or 0.0)
+        loop = asyncio.get_running_loop()
+        try:
+            import requests as _req
+            def _fetch():
+                r = _req.get(
+                    "https://clob.polymarket.com/fee-rate",
+                    params={"token_id": tid},
+                    timeout=3,
+                )
+                r.raise_for_status()
+                return r.json()
+            payload = await loop.run_in_executor(None, _fetch)
+            bps = 0.0
+            if isinstance(payload, dict):
+                raw = (
+                    payload.get("fee_rate_bps")
+                    or payload.get("feeRateBps")
+                    or payload.get("fee_rate")
+                    or payload.get("feeRate")
+                    or 0
+                )
+                try:
+                    bps = float(raw or 0.0)
+                except Exception:
+                    bps = 0.0
+            # API returns bps-parameter (not effective fee). Convert to ratio.
+            fee_param = max(0.0, bps / 10000.0)
+            self._fee_rate_cache[tid] = {"fee_rate_param": fee_param, "ts": now}
+            return fee_param
+        except Exception:
+            # Keep a short-lived zero cache to avoid hammering endpoint on errors.
+            self._fee_rate_cache[tid] = {"fee_rate_param": 0.0, "ts": now - (FEE_RATE_CACHE_TTL_SEC - 60.0)}
+            return 0.0
 
     async def _score_market(self, m: dict) -> dict | None:
         from clawbot_v2.strategy.core import _score_market

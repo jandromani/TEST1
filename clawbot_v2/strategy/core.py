@@ -1524,6 +1524,23 @@ async def _score_market(self, m: dict) -> dict | None:
                 live_entry   = _opp_ask
 
     # ── Entry strategy ────────────────────────────────────────────────────
+    # Dynamic fee parameter from CLOB API (`/fee-rate?token_id=`), cached in engine.
+    # Fallback to legacy estimate if endpoint unavailable.
+    fee_rate_param = 0.0
+    try:
+        fee_rate_param = float(await self._get_token_fee_rate_param(token_id) or 0.0)
+    except Exception:
+        fee_rate_param = 0.0
+    is_crypto_round = bool(asset in ("BTC", "ETH", "SOL", "XRP"))
+    fee_exponent = 2 if is_crypto_round else 1
+    def _effective_fee_ratio(p: float) -> float:
+        p = max(0.0, min(1.0, float(p or 0.0)))
+        base = max(0.0, p * (1.0 - p))
+        if fee_rate_param > 0:
+            # Docs formula: fee/value = feeRate * (p*(1-p))^exponent
+            return max(0.0, fee_rate_param * (base ** fee_exponent))
+        # Legacy fallback: keep prior behaviour if fee-rate endpoint fails.
+        return max(0.001, p * (1.0 - p) * 0.0624)
     # Defensive initialization: keeps evaluate loop alive even if future
     # branches reference execution_ev before the final EV computation.
     execution_ev = -9.0
@@ -1554,7 +1571,8 @@ async def _score_market(self, m: dict) -> dict | None:
     min_ev_base = MIN_EV_NET_5M if duration <= 5 else MIN_EV_NET
     base_min_ev_req = float(min_ev_base)
     base_min_payout_req = float(MIN_PAYOUT_MULT_5M if duration <= 5 else MIN_PAYOUT_MULT)
-    model_cap = true_prob / max(1.0 + FEE_RATE_EST + max(0.003, min_ev_base), 1e-9)
+    fee_for_cap = _effective_fee_ratio(max(0.01, min(0.99, live_entry)))
+    model_cap = true_prob / max(1.0 + fee_for_cap + max(0.003, min_ev_base), 1e-9)
     model_cap = min(model_cap, MAX_ENTRY_PRICE + MAX_ENTRY_TOL)  # never override hard entry cap
     if score >= 9:
         max_entry_allowed = max(max_entry_allowed, min(0.85, model_cap))
@@ -1709,9 +1727,8 @@ async def _score_market(self, m: dict) -> dict | None:
                 f"{Y}[PAYOUT-INFO]{RS} {asset} {side} payout={payout_mult:.3f}x "
                 f"below target={min_payout_req:.3f}x (non-blocking)"
             )
-    # Polymarket fee is price-dependent: p*(1-p)*6.24% (parabolic, peaks at p=0.5).
-    # FEE_RATE_EST (flat 1.56%) overcounts fees on high-payout entries (e.g. p=0.20 → actual=1.0%).
-    _fee_dyn = max(0.001, entry * (1.0 - entry) * 0.0624)
+    # Polymarket docs-based dynamic fee (token-specific fee-rate param + price curve).
+    _fee_dyn = _effective_fee_ratio(entry)
     ev_net = (true_prob / max(entry, 1e-9)) - 1.0 - _fee_dyn
     exec_slip_cost, exec_nofill_penalty, exec_fill_ratio = self._execution_penalties(duration, score, entry)
     execution_ev = ev_net - exec_slip_cost - exec_nofill_penalty
@@ -2428,6 +2445,8 @@ async def _score_market(self, m: dict) -> dict | None:
                           if self.prices.get(asset, 0) > 0 and cl_now > 0 else 0.0,
         "max_entry_allowed": max_entry_allowed,
         "min_entry_allowed": min_entry_allowed,
+        "fee_rate_param": fee_rate_param,
+        "fee_effective_ratio": _fee_dyn,
         "ev_net": ev_net,
         "execution_ev": execution_ev,
         "execution_slip_cost": exec_slip_cost,
