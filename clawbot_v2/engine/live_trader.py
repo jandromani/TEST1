@@ -644,6 +644,11 @@ NEXT_MARKET_ANALYSIS_MIN_CONF = float(os.environ.get("NEXT_MARKET_ANALYSIS_MIN_C
 FORCE_DISABLE_5M = os.environ.get("FORCE_DISABLE_5M", "false").lower() == "true"
 ENABLE_5M = (os.environ.get("ENABLE_5M", "true").lower() == "true") and (not FORCE_DISABLE_5M)
 ONLY_5M_MODE = os.environ.get("ONLY_5M_MODE", "true").lower() == "true"
+REGIME_BUCKET_ONLY_ENABLED = os.environ.get("REGIME_BUCKET_ONLY_ENABLED", "true").lower() == "true"
+REGIME_BUCKET_ONLY_DURATION = int(os.environ.get("REGIME_BUCKET_ONLY_DURATION", "5"))
+REGIME_BUCKET_ONLY_SCORE_MIN = int(os.environ.get("REGIME_BUCKET_ONLY_SCORE_MIN", "9"))
+REGIME_BUCKET_ONLY_SCORE_MAX = int(os.environ.get("REGIME_BUCKET_ONLY_SCORE_MAX", "11"))
+REGIME_BUCKET_ONLY_ENTRY_MAX = float(os.environ.get("REGIME_BUCKET_ONLY_ENTRY_MAX", "0.30"))
 FIVE_M_RUNTIME_GUARD_ENABLED = os.environ.get("FIVE_M_RUNTIME_GUARD_ENABLED", "false").lower() == "true"
 FIVE_M_GUARD_WINDOW = int(os.environ.get("FIVE_M_GUARD_WINDOW", "20"))
 FIVE_M_GUARD_DISABLE_MIN_OUTCOMES = int(os.environ.get("FIVE_M_GUARD_DISABLE_MIN_OUTCOMES", "12"))

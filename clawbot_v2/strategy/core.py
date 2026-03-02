@@ -1290,22 +1290,25 @@ async def _score_market(self, m: dict) -> dict | None:
         except Exception:
             pass
 
-    # Soft preference mode: prefer bucket 5m | s9-11 | <30c, but do not hard-block.
+    # Regime decision filter: trade only selected bucket profile.
     if duration != 5:
         self._skip_tick("mode_only_5m")
         return None
-    if not (9 <= int(score) <= 11):
-        if self._noisy_log_enabled(f"mode-soft-score:{asset}:{cid}", LOG_SKIP_EVERY_SEC):
-            print(
-                f"{Y}[MODE-INFO]{RS} {asset} 5m score={int(score)} outside preferred s9-11 "
-                f"(non-blocking)"
-            )
-    if not (0.0 < float(entry) < 0.30):
-        if self._noisy_log_enabled(f"mode-soft-entry:{asset}:{cid}", LOG_SKIP_EVERY_SEC):
-            print(
-                f"{Y}[MODE-INFO]{RS} {asset} 5m entry={float(entry):.3f} outside preferred <30c "
-                f"(non-blocking)"
-            )
+    if REGIME_BUCKET_ONLY_ENABLED:
+        _dur_ok = (duration == REGIME_BUCKET_ONLY_DURATION)
+        _score_ok = (REGIME_BUCKET_ONLY_SCORE_MIN <= int(score) <= REGIME_BUCKET_ONLY_SCORE_MAX)
+        _entry_ok = (0.0 < float(entry) < REGIME_BUCKET_ONLY_ENTRY_MAX)
+        if not (_dur_ok and _score_ok and _entry_ok):
+            if self._noisy_log_enabled(f"mode-regime-skip:{asset}:{cid}", LOG_SKIP_EVERY_SEC):
+                print(
+                    f"{Y}[MODE-SKIP]{RS} {asset} {duration}m "
+                    f"score={int(score)} entry={float(entry):.3f} "
+                    f"outside regime d={REGIME_BUCKET_ONLY_DURATION} "
+                    f"s={REGIME_BUCKET_ONLY_SCORE_MIN}-{REGIME_BUCKET_ONLY_SCORE_MAX} "
+                    f"e<{REGIME_BUCKET_ONLY_ENTRY_MAX:.2f}"
+                )
+            self._skip_tick("regime_bucket_filter")
+            return None
     if duration <= 5 and px_align_conflict and data_div_pen_applied:
         # Never hard-block in 5m mode: keep as score/edge penalty only.
         if self._noisy_log_enabled(f"pxalign-div-info:{asset}:{cid}", LOG_SKIP_EVERY_SEC):
