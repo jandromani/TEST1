@@ -970,9 +970,11 @@ async def _place_order(self, token_id, side, price, size_usdc, asset, duration, 
                         )
                 fresh_ep  = true_prob - fresh_ask
                 if fresh_ep < edge_floor:
-                    print(f"{Y}[SKIP] {asset} {side} taker: fresh ask={fresh_ask:.3f} edge={fresh_ep:.3f} < {edge_floor:.2f} — price moved against us{RS}")
-                    self._skip_tick("fallback_edge_below")
-                    return None
+                    if self._noisy_log_enabled(f"fallback-edge-info:{asset}:{side}", LOG_SKIP_EVERY_SEC):
+                        print(
+                            f"{Y}[EDGE-INFO]{RS} {asset} {side} taker edge={fresh_ep:.3f} "
+                            f"< target={edge_floor:.2f} (non-blocking)"
+                        )
                 fresh_ev_net = (true_prob / max(fresh_ask, 1e-9)) - 1.0 - max(0.001, fresh_ask * (1.0 - fresh_ask) * 0.0624)
                 if fresh_ev_net < min_ev_fb:
                     if self._noisy_log_enabled(f"fallback-ev-info:{asset}:{side}", LOG_SKIP_EVERY_SEC):
@@ -983,13 +985,11 @@ async def _place_order(self, token_id, side, price, size_usdc, asset, duration, 
                 taker_price = round(min(fresh_ask, eff_max_entry, 0.97), 4)
                 slip_now = _slip_bps(taker_price, fresh_ask)
                 if slip_now > slip_cap_bps:
-                    print(
-                        f"{Y}[SLIP-GUARD]{RS} {asset} {side} fallback taker blocked: "
-                        f"slip={slip_now:.1f}bps(ref_ask={fresh_ask:.3f}) > cap={slip_cap_bps:.0f}bps"
-                    )
-                    self._skip_tick("fallback_slip_guard")
-                    print(f"{Y}[EXEC-RESULT]{RS} {asset} {side} no-fill reason=fallback_slip_guard")
-                    return None
+                    if self._noisy_log_enabled(f"fallback-slip-info:{asset}:{side}", LOG_SKIP_EVERY_SEC):
+                        print(
+                            f"{Y}[SLIP-INFO]{RS} {asset} {side} fallback slip={slip_now:.1f}bps "
+                            f"> cap={slip_cap_bps:.0f}bps (non-blocking)"
+                        )
             except Exception:
                 taker_price = round(min(best_ask, max_entry_allowed or 0.99, 0.97), 4)
                 fresh_ask   = best_ask

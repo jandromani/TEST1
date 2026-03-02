@@ -661,6 +661,7 @@ FIVE_M_DYNAMIC_SCORE_ADD_WORSE = int(os.environ.get("FIVE_M_DYNAMIC_SCORE_ADD_WO
 ORDER_FAST_MODE = os.environ.get("ORDER_FAST_MODE", "true").lower() == "true"
 ALWAYS_LIMIT_FOK_EXEC = os.environ.get("ALWAYS_LIMIT_FOK_EXEC", "true").lower() == "true"
 NO_GATES_MODE = os.environ.get("NO_GATES_MODE", "true").lower() == "true"
+TRUE_PROB_ONLY_MODE = os.environ.get("TRUE_PROB_ONLY_MODE", "true").lower() == "true"
 MAKER_POLL_5M_SEC = float(os.environ.get("MAKER_POLL_5M_SEC", "0.15"))
 MAKER_POLL_15M_SEC = float(os.environ.get("MAKER_POLL_15M_SEC", "0.25"))
 MAKER_WAIT_5M_SEC = float(os.environ.get("MAKER_WAIT_5M_SEC", "0.30"))
@@ -7505,6 +7506,11 @@ class LiveTrader:
 
     def _signal_growth_score(self, sig: dict) -> float:
         """Rank candidates by growth quality (higher is better)."""
+        if TRUE_PROB_ONLY_MODE:
+            # Pure decision rule: choose by posterior probability only.
+            # No additional ranking limits (score/edge/payout heuristics disabled).
+            return float(sig.get("true_prob", 0.0) or 0.0)
+        duration = int(sig.get("duration", 0) or 0)
         entry = max(float(sig.get("entry", 0.5)), 1e-6)
         score = float(sig.get("score", 0))
         edge = float(sig.get("edge", 0.0))
@@ -7543,6 +7549,20 @@ class LiveTrader:
         # Horizon optimizer (Polymarket 5m/15m round outcomes): reward duration
         # with stronger recent win-quality / expectancy on resolved markets.
         horizon_bonus = self._horizon_quality_bonus(int(sig.get("duration", 0) or 0))
+        # Regime preference (decision rule, not hard filter):
+        # prioritize the empirically best bucket: 5m | s9-11 | <30c.
+        regime_bonus = 0.0
+        if duration <= 5:
+            if 9.0 <= score <= 11.0:
+                regime_bonus += 0.10
+            else:
+                regime_bonus -= 0.03
+            if entry < 0.30:
+                regime_bonus += 0.10
+            elif entry < 0.40:
+                regime_bonus -= 0.03
+            else:
+                regime_bonus -= 0.08
         return (
             ev_net
             + edge * 0.38
@@ -7555,6 +7575,7 @@ class LiveTrader:
             + low_cent_pen
             + wr_pen
             + lag_penalty
+            + regime_bonus
         )
 
     def _wallet_alpha_bonus(self, sig: dict) -> float:

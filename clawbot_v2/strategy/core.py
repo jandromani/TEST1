@@ -1316,8 +1316,11 @@ async def _score_market(self, m: dict) -> dict | None:
         and true_prob >= HIGHPAYOUT_MIN_PROB
     )
     if true_prob < min_tp and not _highpayout_bypass:
-        self._skip_tick("prob_below_gate")
-        return None
+        if self._noisy_log_enabled(f"prob-info:{asset}:{cid}", LOG_SKIP_EVERY_SEC):
+            print(
+                f"{Y}[PROB-INFO]{RS} {asset} {duration}m prob={true_prob:.3f} "
+                f"< target={min_tp:.3f} (non-blocking)"
+            )
 
     # ── Score gate (duration-aware) ─────────────────────────────────────
     min_score_local = MIN_SCORE_GATE
@@ -1672,10 +1675,14 @@ async def _score_market(self, m: dict) -> dict | None:
                     f"-> clipped={entry:.3f} band=[{min_entry_allowed:.2f},{max_entry_allowed:.2f}]"
                 )
         else:
-            if self._noisy_log_enabled(f"skip-score-entry:{asset}:{side}", LOG_SKIP_EVERY_SEC):
-                print(f"{Y}[SKIP] {asset} {side} entry={live_entry:.3f} outside [{min_entry_allowed:.2f},{max_entry_allowed:.2f}]{RS}")
-            self._skip_tick("entry_outside")
-            return None
+            # Non-blocking: clip live entry to nearest executable bound.
+            if self._noisy_log_enabled(f"entry-clip:{asset}:{side}", LOG_SKIP_EVERY_SEC):
+                print(
+                    f"{Y}[ENTRY-INFO]{RS} {asset} {side} entry={live_entry:.3f} "
+                    f"outside [{min_entry_allowed:.2f},{max_entry_allowed:.2f}] -> clipped"
+                )
+            use_limit = True
+            entry = max(min_entry_allowed, min(max_entry_allowed, live_entry))
 
     payout_mult = 1.0 / max(entry, 1e-9)
     if payout_mult < min_payout_req:
