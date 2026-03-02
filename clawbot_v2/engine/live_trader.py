@@ -410,21 +410,26 @@ SCAN_INTERVAL  = float(os.environ.get("SCAN_INTERVAL", "0.5"))
 SCORE_DEBOUNCE_SEC = float(os.environ.get("SCORE_DEBOUNCE_SEC", "0.9"))
 RTDS_EVAL_MIN_INTERVAL_SEC = float(os.environ.get("RTDS_EVAL_MIN_INTERVAL_SEC", "1.0"))
 MARKET_REFRESH_SEC = float(os.environ.get("MARKET_REFRESH_SEC", "30.0"))  # how often to re-fetch Gamma API (was every 0.5s = 600 req/min!)
-PING_INTERVAL  = int(os.environ.get("PING_INTERVAL", "5"))
+PING_INTERVAL  = float(os.environ.get("RTDS_PING_INTERVAL_SEC", os.environ.get("PING_INTERVAL", "5")))
 RTDS_RECV_TIMEOUT_SEC = float(os.environ.get("RTDS_RECV_TIMEOUT_SEC", "75.0"))
 RTDS_IDLE_RECONNECT_SEC = float(os.environ.get("RTDS_IDLE_RECONNECT_SEC", "120.0"))
 RTDS_CONNECT_MIN_GAP_SEC = float(os.environ.get("RTDS_CONNECT_MIN_GAP_SEC", "3.0"))
+RTDS_CONNECT_JITTER_SEC = float(os.environ.get("RTDS_CONNECT_JITTER_SEC", "1.5"))
 RTDS_429_BASE_BACKOFF_SEC = float(os.environ.get("RTDS_429_BASE_BACKOFF_SEC", "120.0"))
-RTDS_429_MAX_BACKOFF_SEC = float(os.environ.get("RTDS_429_MAX_BACKOFF_SEC", "3600.0"))
+RTDS_429_MAX_BACKOFF_SEC = float(os.environ.get("RTDS_BACKOFF_MAX_SEC", os.environ.get("RTDS_429_MAX_BACKOFF_SEC", "1800.0")))
+RTDS_BACKOFF_MULTIPLIER = float(os.environ.get("RTDS_BACKOFF_MULTIPLIER", "2.0"))
+RTDS_JITTER_FACTOR = float(os.environ.get("RTDS_JITTER_FACTOR", "0.30"))
 RTDS_429_QUARANTINE_SEC = float(os.environ.get("RTDS_429_QUARANTINE_SEC", "900.0"))
 RTDS_429_DISABLE_AFTER = int(os.environ.get("RTDS_429_DISABLE_AFTER", "6"))
 RTDS_HARD_STALE_SEC = float(os.environ.get("RTDS_HARD_STALE_SEC", "300.0"))
+RTDS_TIMEOUTS_BEFORE_RECONNECT = int(os.environ.get("RTDS_TIMEOUTS_BEFORE_RECONNECT", "6"))
 RTDS_MARKET_SUB_BATCH_SIZE = int(os.environ.get("RTDS_MARKET_SUB_BATCH_SIZE", "20"))
 RTDS_MARKET_SUB_STEP_SEC = float(os.environ.get("RTDS_MARKET_SUB_STEP_SEC", "0.35"))
 RTDS_ENABLE_MARKET_SUBS = str(os.environ.get("RTDS_ENABLE_MARKET_SUBS", "0")).strip().lower() in ("1", "true", "yes", "on")
 RTDS_ENABLE_CHAINLINK = str(os.environ.get("RTDS_ENABLE_CHAINLINK", "0")).strip().lower() in ("1", "true", "yes", "on")
 RTDS_STRICT_ONLY = str(os.environ.get("RTDS_STRICT_ONLY", "1")).strip().lower() in ("1", "true", "yes", "on")
 RTDS_REQUIRED_FOR_ENTRY = str(os.environ.get("RTDS_REQUIRED_FOR_ENTRY", "1")).strip().lower() in ("1", "true", "yes", "on")
+RTDS_FALLBACK_ONLY_MONITOR = str(os.environ.get("RTDS_FALLBACK_ONLY_MONITOR", "1")).strip().lower() in ("1", "true", "yes", "on")
 FEE_RATE_CACHE_TTL_SEC = float(os.environ.get("FEE_RATE_CACHE_TTL_SEC", "900"))
 STATUS_INTERVAL= int(os.environ.get("STATUS_INTERVAL", "15"))
 ONCHAIN_SYNC_SEC = float(os.environ.get("ONCHAIN_SYNC_SEC", "2.0"))
@@ -4517,6 +4522,48 @@ class LiveTrader:
                   f"waiting {elapsed_r:.0f}min | rk={rk_r} cid={self._short_cid(cid)}")
 
     # ── RTDS ──────────────────────────────────────────────────────────────────
+    def _extract_rtds_error_info(self, err: Exception) -> dict:
+        """Normalize websocket handshake/runtime errors for structured RTDS logs."""
+        info = {
+            "status": None,
+            "headers": {},
+            "retry_after_s": None,
+            "error": str(err),
+        }
+        try:
+            if hasattr(err, "status_code"):
+                info["status"] = int(getattr(err, "status_code"))
+            elif hasattr(err, "status"):
+                info["status"] = int(getattr(err, "status"))
+            elif hasattr(err, "response") and getattr(err, "response", None) is not None:
+                resp = getattr(err, "response")
+                code = getattr(resp, "status_code", None)
+                if code is not None:
+                    info["status"] = int(code)
+            headers_obj = None
+            if hasattr(err, "headers"):
+                headers_obj = getattr(err, "headers")
+            elif hasattr(err, "response") and getattr(err, "response", None) is not None:
+                headers_obj = getattr(getattr(err, "response"), "headers", None)
+            if headers_obj:
+                headers = {}
+                for k, v in dict(headers_obj).items():
+                    headers[str(k)] = str(v)
+                info["headers"] = headers
+                ra = (
+                    headers.get("Retry-After")
+                    or headers.get("retry-after")
+                    or headers.get("x-ratelimit-reset")
+                )
+                if ra is not None:
+                    try:
+                        info["retry_after_s"] = max(0.0, float(str(ra).strip()))
+                    except Exception:
+                        pass
+        except Exception:
+            pass
+        return info
+
     async def stream_rtds(self):
         while True:
             now0 = _time.time()
@@ -4529,6 +4576,8 @@ class LiveTrader:
                 if self._noisy_log_enabled("rtds-disabled-wait", 30.0) and float(self._rtds_disabled_until or 0.0) > now0:
                     print(f"{Y}[RTDS]{RS} in 429 quarantine for {wait_until - now0:.1f}s")
                 await asyncio.sleep(wait_until - now0)
+            if RTDS_CONNECT_JITTER_SEC > 0:
+                await asyncio.sleep(random.uniform(0.0, max(0.0, RTDS_CONNECT_JITTER_SEC)))
             self._rtds_last_connect_try_ts = _time.time()
             pinger_task = None
             try:
@@ -4551,6 +4600,7 @@ class LiveTrader:
                     self._rtds_cooldown_until = 0.0
                     self._rtds_last_msg_ts = _time.time()
                     print(f"{G}[RTDS] Live — streaming BTC/ETH/SOL/XRP{RS}")
+                    timeout_strikes = 0
 
                     # RTDS supports only documented topic/type subscriptions.
                     # Market/orderbook token subscriptions are handled by CLOB market WS, not RTDS.
@@ -4574,11 +4624,16 @@ class LiveTrader:
                         except asyncio.TimeoutError:
                             idle_s = (_time.time() - float(self._rtds_last_msg_ts or 0.0))
                             if idle_s > max(float(RTDS_HARD_STALE_SEC), float(RTDS_IDLE_RECONNECT_SEC)):
+                                timeout_strikes += 1
+                            else:
+                                timeout_strikes = 0
+                            if timeout_strikes >= max(1, int(RTDS_TIMEOUTS_BEFORE_RECONNECT)):
                                 raise TimeoutError(f"RTDS recv stale ({idle_s:.1f}s)")
                             # Keep the socket alive; avoid reconnect churn on short quiet windows.
                             continue
                         if not raw: continue
                         self._rtds_last_msg_ts = _time.time()
+                        timeout_strikes = 0
                         try:
                             if isinstance(raw, (bytes, bytearray)):
                                 raw = raw.decode("utf-8", "ignore")
@@ -4653,16 +4708,38 @@ class LiveTrader:
                 self.rtds_ok = False
                 self._rtds_ws = None
                 print(f"{R}[RTDS] Reconnect: {e}{RS}")
+                info = self._extract_rtds_error_info(e)
                 err_s = str(e).lower()
+                status_code = int(info.get("status") or 0)
                 fails = int(getattr(self, "_rtds_fails", 0) or 0) + 1
                 self._rtds_fails = fails
-                if "429" in err_s or "too many requests" in err_s:
+                is_429 = (
+                    status_code == 429
+                    or "429" in err_s
+                    or "too many requests" in err_s
+                    or "rate limit" in err_s
+                )
+                if is_429:
                     self._rtds_429_streak = int(getattr(self, "_rtds_429_streak", 0) or 0) + 1
                     # Upstream throttling: back off harder to recover stable freshness.
-                    wait_s = min(
+                    retry_after_s = float(info.get("retry_after_s") or 0.0)
+                    calc_wait_s = min(
                         max(10.0, RTDS_429_MAX_BACKOFF_SEC),
-                        max(5.0, RTDS_429_BASE_BACKOFF_SEC) * (2.0 ** min(8, fails - 1)),
+                        max(5.0, RTDS_429_BASE_BACKOFF_SEC)
+                        * (max(1.05, RTDS_BACKOFF_MULTIPLIER) ** min(8, fails - 1)),
                     )
+                    wait_s = max(calc_wait_s, retry_after_s)
+                    payload = {
+                        "ts": datetime.now(timezone.utc).isoformat(),
+                        "status": 429,
+                        "retry_after_s": retry_after_s if retry_after_s > 0 else None,
+                        "backoff_s": round(wait_s, 2),
+                        "fails": fails,
+                        "streak_429": int(self._rtds_429_streak or 0),
+                        "headers": info.get("headers", {}),
+                        "error": info.get("error", ""),
+                    }
+                    print(f"{Y}[RTDS-429]{RS} " + json.dumps(payload, separators=(",", ":"), ensure_ascii=True))
                     if self._rtds_429_streak >= max(1, RTDS_429_DISABLE_AFTER):
                         q_for = max(wait_s, float(RTDS_429_QUARANTINE_SEC))
                         self._rtds_disabled_until = max(
@@ -4677,8 +4754,12 @@ class LiveTrader:
                 else:
                     self._rtds_429_streak = 0
                     # Non-429 reconnects: still exponential+jitter but less aggressive.
-                    wait_s = min(120.0, 2.0 * (2 ** min(6, fails - 1)))
-                wait_s = wait_s * random.uniform(0.90, 1.25)
+                    wait_s = min(
+                        180.0,
+                        2.0 * (max(1.10, RTDS_BACKOFF_MULTIPLIER) ** min(6, fails - 1)),
+                    )
+                _jf = max(0.0, min(0.90, RTDS_JITTER_FACTOR))
+                wait_s = wait_s * random.uniform(1.0 - _jf, 1.0 + _jf)
                 self._rtds_cooldown_until = max(float(self._rtds_cooldown_until or 0.0), _time.time() + wait_s)
                 if self._noisy_log_enabled("rtds-retry", 5.0):
                     print(f"{Y}[RTDS]{RS} retry in {wait_s:.1f}s (fails={fails})")
@@ -6191,7 +6272,12 @@ class LiveTrader:
                         # ── Price feed failover: drive self.prices from Binance when RTDS is down/stale ──
                         price = float(data.get("p", 0) or 0)
                         rtds_age = ts - float(self._rtds_asset_ts.get(asset, 0.0) or 0.0)
-                        use_bnb_fallback = (not RTDS_STRICT_ONLY) and ((not self.rtds_ok) or (rtds_age > 3.0))
+                        # In monitor-only mode never use Binance prices for trading decisions.
+                        use_bnb_fallback = (
+                            (not RTDS_FALLBACK_ONLY_MONITOR)
+                            and (not RTDS_STRICT_ONLY)
+                            and ((not self.rtds_ok) or (rtds_age > 3.0))
+                        )
                         if price > 0 and use_bnb_fallback:
                             self.prices[asset] = price
                             self._price_src[asset] = ("BNB-FB" if not self.rtds_ok else "BNB")
