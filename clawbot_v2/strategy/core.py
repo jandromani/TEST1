@@ -1298,6 +1298,24 @@ async def _score_market(self, m: dict) -> dict | None:
             pass
 
     # Regime decision filter: trade only selected bucket profile.
+    # IMPORTANT: use real side-token entry (CLOB best_ask) when available,
+    # not only synthetic entry derived from up_price.
+    regime_entry = float(entry)
+    regime_token_id = str(m.get("token_up", "") if side == "Up" else m.get("token_down", "")).strip()
+    if regime_token_id:
+        regime_book = None
+        # Reuse prefetched book when it matches selected side token.
+        if regime_token_id == prefetch_token and isinstance(_pm_book, dict):
+            regime_book = _pm_book
+        # Prefer fresh WS orderbook for side token.
+        if regime_book is None:
+            regime_book = self._get_clob_ws_book(regime_token_id, max_age_ms=CLOB_MARKET_WS_MAX_AGE_MS)
+        if isinstance(regime_book, dict):
+            _ask = float(regime_book.get("best_ask", 0.0) or 0.0)
+            _ts = float(regime_book.get("ts", 0.0) or 0.0)
+            _age_ms = ((_time.time() - _ts) * 1000.0) if _ts > 0 else 9e9
+            if _ask > 0 and _age_ms <= MAX_ORDERBOOK_AGE_MS:
+                regime_entry = _ask
     if duration != 5:
         self._skip_tick("mode_only_5m")
         return None
@@ -1306,7 +1324,7 @@ async def _score_market(self, m: dict) -> dict | None:
         # In low-cent 5m mode we intentionally ignore score bands:
         # regime is defined only by duration + entry cents.
         _score_ok = True
-        _entry_ok = (0.0 < float(entry) < REGIME_BUCKET_ONLY_ENTRY_MAX)
+        _entry_ok = (0.0 < float(regime_entry) < REGIME_BUCKET_ONLY_ENTRY_MAX)
         if not (_dur_ok and _score_ok and _entry_ok):
             if self._noisy_log_enabled(f"mode-regime-skip:{asset}:{cid}", max(8.0, float(LOG_SKIP_EVERY_SEC))):
                 _why = []
@@ -1316,7 +1334,7 @@ async def _score_market(self, m: dict) -> dict | None:
                     _why.append("entry")
                 print(
                     f"{Y}[MODE-SKIP]{RS} {asset} {duration}m "
-                    f"score={int(score)} entry={float(entry):.3f} "
+                    f"score={int(score)} entry={float(regime_entry):.3f} "
                     f"outside regime d={REGIME_BUCKET_ONLY_DURATION} "
                     f"s=ALL e<{REGIME_BUCKET_ONLY_ENTRY_MAX:.2f} "
                     f"why={'+'.join(_why) or 'unknown'}"
