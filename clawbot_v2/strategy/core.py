@@ -1296,18 +1296,23 @@ async def _score_market(self, m: dict) -> dict | None:
         return None
     if REGIME_BUCKET_ONLY_ENABLED:
         _dur_ok = (duration == REGIME_BUCKET_ONLY_DURATION)
-        _score_ok = True if LOWCENT_TEST_ALL_SCORES_5M else (
-            REGIME_BUCKET_ONLY_SCORE_MIN <= int(score) <= REGIME_BUCKET_ONLY_SCORE_MAX
-        )
+        # In low-cent 5m mode we intentionally ignore score bands:
+        # regime is defined only by duration + entry cents.
+        _score_ok = True
         _entry_ok = (0.0 < float(entry) < REGIME_BUCKET_ONLY_ENTRY_MAX)
         if not (_dur_ok and _score_ok and _entry_ok):
             if self._noisy_log_enabled(f"mode-regime-skip:{asset}:{cid}", LOG_SKIP_EVERY_SEC):
+                _why = []
+                if not _dur_ok:
+                    _why.append("duration")
+                if not _entry_ok:
+                    _why.append("entry")
                 print(
                     f"{Y}[MODE-SKIP]{RS} {asset} {duration}m "
                     f"score={int(score)} entry={float(entry):.3f} "
                     f"outside regime d={REGIME_BUCKET_ONLY_DURATION} "
-                    f"s={REGIME_BUCKET_ONLY_SCORE_MIN}-{REGIME_BUCKET_ONLY_SCORE_MAX} "
-                    f"e<{REGIME_BUCKET_ONLY_ENTRY_MAX:.2f}"
+                    f"s=ALL e<{REGIME_BUCKET_ONLY_ENTRY_MAX:.2f} "
+                    f"why={'+'.join(_why) or 'unknown'}"
                 )
             self._skip_tick("regime_bucket_filter")
             return None

@@ -441,6 +441,8 @@ OPEN_STATE_CACHE_FILE = os.path.join(_DATA_DIR, "clawdbot_open_state_cache.json"
 OPEN_STATE_CACHE_SAVE_SEC = float(os.environ.get("OPEN_STATE_CACHE_SAVE_SEC", "15"))
 DASHBOARD_STRICT_CANONICAL = os.environ.get("DASHBOARD_STRICT_CANONICAL", "true").lower() == "true"
 DASHBOARD_FALLBACK_DEBUG = os.environ.get("DASHBOARD_FALLBACK_DEBUG", "false").lower() == "true"
+DASH_CHART_MAX_STEP_PCT = float(os.environ.get("DASH_CHART_MAX_STEP_PCT", "0.0035"))
+DASH_CHART_MAX_STEP_DT_SEC = float(os.environ.get("DASH_CHART_MAX_STEP_DT_SEC", "2.5"))
 CID_MARKET_CACHE_MAX = int(os.environ.get("CID_MARKET_CACHE_MAX", "1200"))
 CID_MARKET_CACHE_TTL_SEC = float(os.environ.get("CID_MARKET_CACHE_TTL_SEC", str(7 * 86400)))
 AUTOPILOT_ENABLED = os.environ.get("AUTOPILOT_ENABLED", "true").lower() == "true"
@@ -10753,6 +10755,10 @@ canvas{display:block;width:100%!important}
 const ch={},cm={};
 const _mid404=new Set();
 let _midSeries={},_posMeta={};
+const _pmSeriesCache={};
+const _pmSeriesInflight={};
+const _pmEventSeriesCache={};
+const _pmEventSeriesInflight={};
 function fmt(n,d=2){return Number(n).toLocaleString('en-US',{minimumFractionDigits:d,maximumFractionDigits:d})}
 function fmtT(ts){const x=new Date(ts*1e3);return x.toLocaleTimeString('en-US',{hour:'2-digit',minute:'2-digit',second:'2-digit',hour12:false})}
 function pfx(v){return v>0?'+':''}
@@ -10977,6 +10983,81 @@ function drawChart(id,pts,openP,curP,sTs,eTs,now){
   }
 }
 
+function _toSeriesPoints(raw){
+  if(!raw)return [];
+  const arr=Array.isArray(raw)?raw:(Array.isArray(raw.history)?raw.history:(Array.isArray(raw.data)?raw.data:[]));
+  const out=[];
+  for(const row of arr){
+    const t=Number(row?.t ?? row?.timestamp ?? row?.ts ?? 0);
+    const p=Number(row?.p ?? row?.price ?? row?.value ?? 0);
+    if(Number.isFinite(t) && Number.isFinite(p) && t>0 && p>0)out.push({t,p});
+  }
+  out.sort((a,b)=>a.t-b.t);
+  const dedup=[];
+  for(const pt of out){
+    const last=dedup[dedup.length-1];
+    if(last && Math.abs(last.t-pt.t)<1e-9){last.p=pt.p;continue;}
+    dedup.push(pt);
+  }
+  return dedup;
+}
+
+async function fetchPMSeries(tokenId,startTs,endTs){
+  const tid=String(tokenId||'').trim();
+  const s=Math.max(0,Math.floor(Number(startTs||0)));
+  const e=Math.max(s+60,Math.floor(Number(endTs||0)));
+  if(!tid||!s||!e)return [];
+  const key=`${tid}:${s}:${e}`;
+  if(Array.isArray(_pmSeriesCache[key]))return _pmSeriesCache[key];
+  if(_pmSeriesInflight[key])return _pmSeriesInflight[key];
+  const q=new URLSearchParams({
+    market: tid,
+    startTs: String(Math.max(0,s-90)),
+    endTs: String(e+15),
+  });
+  _pmSeriesInflight[key]=(async()=>{
+    try{
+      const r=await fetch('https://clob.polymarket.com/prices-history?'+q.toString(),{cache:'no-store'});
+      if(!r.ok)return [];
+      const j=await r.json();
+      const pts=_toSeriesPoints(j);
+      _pmSeriesCache[key]=pts;
+      return pts;
+    }catch(e){return [];}
+    finally{delete _pmSeriesInflight[key];}
+  })();
+  return _pmSeriesInflight[key];
+}
+
+async function fetchPMEventSeries(asset,startTs,endTs,duration){
+  const sym=String(asset||'').trim().toUpperCase();
+  const s=Math.max(0,Math.floor(Number(startTs||0)));
+  const e=Math.max(s+60,Math.floor(Number(endTs||0)));
+  if(!sym||!s||!e)return [];
+  const variant=(Number(duration||15)<=5)?'fiveminute':'fifteenminute';
+  const key=`${sym}:${variant}:${s}:${e}`;
+  if(Array.isArray(_pmEventSeriesCache[key]))return _pmEventSeriesCache[key];
+  if(_pmEventSeriesInflight[key])return _pmEventSeriesInflight[key];
+  const q=new URLSearchParams({
+    symbol: sym,
+    eventStartTime: new Date(s*1000).toISOString(),
+    variant,
+    endDate: new Date(e*1000).toISOString(),
+  });
+  _pmEventSeriesInflight[key]=(async()=>{
+    try{
+      const r=await fetch('https://polymarket.com/api/crypto/crypto-price?'+q.toString(),{cache:'no-store'});
+      if(!r.ok)return [];
+      const j=await r.json();
+      const pts=_toSeriesPoints(j);
+      _pmEventSeriesCache[key]=pts;
+      return pts;
+    }catch(e){return [];}
+    finally{delete _pmEventSeriesInflight[key];}
+  })();
+  return _pmEventSeriesInflight[key];
+}
+
 function renderPositions(d){
   const now=d.now_ts;
   document.getElementById('pos-title').textContent='Open Positions'+(d.positions.length?' · '+d.positions.length:'');
@@ -11025,9 +11106,24 @@ function renderPositions(d){
   }).join('');
   d.positions.forEach((p,idx)=>{
     const uid=((p.cid_full||p.cid||'x').replace(/[^a-zA-Z0-9]/g,'').slice(-20)||'x')+'_'+idx;
-    _posMeta[uid]={open_p:p.open_p,cur_p:p.cur_p,start_ts:p.start_ts,end_ts:p.end_ts,duration:p.duration||15};
+    _posMeta[uid]={open_p:p.open_p,cur_p:p.cur_p,start_ts:p.start_ts,end_ts:p.end_ts,duration:p.duration||15,token_id:String(p.token_id||'').trim()};
     const basePts=d.charts[p.asset]||[];
     drawChart('c'+uid,basePts,p.open_p,p.cur_p,p.start_ts,p.end_ts,now);
+    fetchPMEventSeries(p.asset,p.start_ts,p.end_ts,p.duration||15).then((evtPts)=>{
+      const pm=_posMeta[uid];
+      if(!pm)return;
+      if(evtPts && evtPts.length){
+        drawChart('c'+uid,evtPts,p.open_p,p.cur_p,p.start_ts,p.end_ts,now);
+        return;
+      }
+      const tid=String(p.token_id||'').trim();
+      if(!tid)return;
+      fetchPMSeries(tid,p.start_ts,p.end_ts).then((pmPts)=>{
+        if(pmPts && pmPts.length && _posMeta[uid]){
+          drawChart('c'+uid,pmPts,p.open_p,p.cur_p,p.start_ts,p.end_ts,now);
+        }
+      });
+    });
   });
   _mt={};d.positions.forEach((p,idx)=>{
     const uid=((p.cid_full||p.cid||'x').replace(/[^a-zA-Z0-9]/g,'').slice(-20)||'x')+'_'+idx;
