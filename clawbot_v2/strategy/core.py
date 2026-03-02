@@ -1296,7 +1296,9 @@ async def _score_market(self, m: dict) -> dict | None:
         return None
     if REGIME_BUCKET_ONLY_ENABLED:
         _dur_ok = (duration == REGIME_BUCKET_ONLY_DURATION)
-        _score_ok = (REGIME_BUCKET_ONLY_SCORE_MIN <= int(score) <= REGIME_BUCKET_ONLY_SCORE_MAX)
+        _score_ok = True if LOWCENT_TEST_ALL_SCORES_5M else (
+            REGIME_BUCKET_ONLY_SCORE_MIN <= int(score) <= REGIME_BUCKET_ONLY_SCORE_MAX
+        )
         _entry_ok = (0.0 < float(entry) < REGIME_BUCKET_ONLY_ENTRY_MAX)
         if not (_dur_ok and _score_ok and _entry_ok):
             if self._noisy_log_enabled(f"mode-regime-skip:{asset}:{cid}", LOG_SKIP_EVERY_SEC):
@@ -2101,6 +2103,23 @@ async def _score_market(self, m: dict) -> dict | None:
 
     if size < MIN_EXEC_NOTIONAL_USDC:
         return None
+
+    # 5m low-cent test mode: enforce only a minimal notional floor (~$1), never hard-cap.
+    if (
+        LOWCENT_TEST_MIN_SIZE_ENABLED
+        and duration <= 5
+        and (0.0 < float(entry) < float(REGIME_BUCKET_ONLY_ENTRY_MAX))
+    ):
+        min_sz = max(float(MIN_EXEC_NOTIONAL_USDC), float(LOWCENT_TEST_MIN_SIZE_USDC))
+        old_size = float(size)
+        size = round(max(old_size, min_sz), 2)
+        if size <= 0:
+            return None
+        if self._noisy_log_enabled(f"size-fixed-lowcent:{asset}:{cid}", LOG_FLOW_EVERY_SEC):
+            print(
+                f"{B}[SIZE-FLOOR]{RS} {asset} {duration}m {side} lowcent "
+                f"${old_size:.2f}->${size:.2f}"
+            )
 
     # Portfolio sizing mix (non-blocking):
     # - core zone: slightly larger size
