@@ -11201,7 +11201,26 @@ async function fetchPMEventSeries(asset,startTs,endTs,duration){
       const r=await fetch('https://polymarket.com/api/crypto/crypto-price?'+q.toString(),{cache:'no-store'});
       if(!r.ok)return [];
       const j=await r.json();
-      const pts=_toSeriesPoints(j);
+      let pts=_toSeriesPoints(j);
+      // Some Polymarket responses are a compact object:
+      // {openPrice, closePrice, timestamp, completed, incomplete}
+      // Convert it into chart points so the dashboard does not treat it as empty.
+      if((!pts || !pts.length) && j && !Array.isArray(j) && typeof j==='object'){
+        const op=Number(j.openPrice||0);
+        const cp=Number(j.closePrice||0);
+        let ts=Number(j.timestamp||0);
+        if(ts>1e12)ts=Math.floor(ts/1000);
+        const s=Math.max(0,Math.floor(Number(startTs||0)));
+        const e=Math.max(s+60,Math.floor(Number(endTs||0)));
+        if(Number.isFinite(op) && op>0){
+          if(Number.isFinite(cp) && cp>0){
+            pts=[{t:s,p:op},{t:Math.max(s+1,e),p:cp}];
+          }else{
+            const tMid=(Number.isFinite(ts) && ts>0)?Math.min(e,Math.max(s+1,ts)):Math.max(s+1,Math.floor((s+e)/2));
+            pts=[{t:s,p:op},{t:tMid,p:op}];
+          }
+        }
+      }
       _pmEventSeriesCache[key]=pts;
       return pts;
     }catch(e){return [];}
@@ -11261,6 +11280,11 @@ function renderPositions(d){
     _posMeta[uid]={open_p:p.open_p,cur_p:p.cur_p,start_ts:p.start_ts,end_ts:p.end_ts,duration:p.duration||15,token_id:String(p.token_id||'').trim()};
     const basePts=d.charts[p.asset]||[];
     drawChart('c'+uid,basePts,p.open_p,p.cur_p,p.start_ts,p.end_ts,now);
+    // Prefer local live series (RTDS/CL/BNB-fed) for smooth updates.
+    // Use Polymarket external series only as sparse-data fallback.
+    const localLastTs=(basePts && basePts.length)?Number(basePts[basePts.length-1].t||0):0;
+    const localFresh=basePts.length>=8 && (now-localLastTs)<=15;
+    if(localFresh)return;
     fetchPMEventSeries(p.asset,p.start_ts,p.end_ts,p.duration||15).then((evtPts)=>{
       const pm=_posMeta[uid];
       if(!pm)return;
