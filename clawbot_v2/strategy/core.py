@@ -1273,17 +1273,22 @@ async def _score_market(self, m: dict) -> dict | None:
         except Exception:
             pass
 
-    # Hard trading mode: keep only bucket 5m | s9-11 | <30c.
-    # Everything else is intentionally discarded.
+    # Soft preference mode: prefer bucket 5m | s9-11 | <30c, but do not hard-block.
     if duration != 5:
         self._skip_tick("mode_only_5m")
         return None
     if not (9 <= int(score) <= 11):
-        self._skip_tick("mode_only_s9_11")
-        return None
+        if self._noisy_log_enabled(f"mode-soft-score:{asset}:{cid}", LOG_SKIP_EVERY_SEC):
+            print(
+                f"{Y}[MODE-INFO]{RS} {asset} 5m score={int(score)} outside preferred s9-11 "
+                f"(non-blocking)"
+            )
     if not (0.0 < float(entry) < 0.30):
-        self._skip_tick("mode_only_lt30c")
-        return None
+        if self._noisy_log_enabled(f"mode-soft-entry:{asset}:{cid}", LOG_SKIP_EVERY_SEC):
+            print(
+                f"{Y}[MODE-INFO]{RS} {asset} 5m entry={float(entry):.3f} outside preferred <30c "
+                f"(non-blocking)"
+            )
     if duration <= 5 and px_align_conflict and data_div_pen_applied:
         # Never hard-block in 5m mode: keep as score/edge penalty only.
         if self._noisy_log_enabled(f"pxalign-div-info:{asset}:{cid}", LOG_SKIP_EVERY_SEC):
