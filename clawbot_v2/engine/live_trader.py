@@ -416,6 +416,9 @@ RTDS_IDLE_RECONNECT_SEC = float(os.environ.get("RTDS_IDLE_RECONNECT_SEC", "120.0
 RTDS_CONNECT_MIN_GAP_SEC = float(os.environ.get("RTDS_CONNECT_MIN_GAP_SEC", "3.0"))
 RTDS_429_BASE_BACKOFF_SEC = float(os.environ.get("RTDS_429_BASE_BACKOFF_SEC", "120.0"))
 RTDS_429_MAX_BACKOFF_SEC = float(os.environ.get("RTDS_429_MAX_BACKOFF_SEC", "3600.0"))
+RTDS_HARD_STALE_SEC = float(os.environ.get("RTDS_HARD_STALE_SEC", "300.0"))
+RTDS_MARKET_SUB_BATCH_SIZE = int(os.environ.get("RTDS_MARKET_SUB_BATCH_SIZE", "20"))
+RTDS_MARKET_SUB_STEP_SEC = float(os.environ.get("RTDS_MARKET_SUB_STEP_SEC", "0.35"))
 RTDS_ENABLE_MARKET_SUBS = str(os.environ.get("RTDS_ENABLE_MARKET_SUBS", "0")).strip().lower() in ("1", "true", "yes", "on")
 RTDS_ENABLE_CHAINLINK = str(os.environ.get("RTDS_ENABLE_CHAINLINK", "0")).strip().lower() in ("1", "true", "yes", "on")
 FEE_RATE_CACHE_TTL_SEC = float(os.environ.get("FEE_RATE_CACHE_TTL_SEC", "900"))
@@ -4541,16 +4544,28 @@ class LiveTrader:
                     # Keep RTDS lightweight to avoid upstream throttling (429).
                     # Token-level market subscriptions are optional and disabled by default.
                     if RTDS_ENABLE_MARKET_SUBS:
-                        for cid, m in list(self.active_mkts.items()):
+                        tids = []
+                        for _, m in list(self.active_mkts.items()):
                             for tid in [m.get("token_up", ""), m.get("token_down", "")]:
-                                if tid:
-                                    try:
-                                        await ws.send(json.dumps({
-                                            "action": "subscribe",
-                                            "subscriptions": [{"asset_id": tid, "type": "market"}]
-                                        }))
-                                    except Exception:
-                                        pass
+                                tid_s = str(tid or "").strip()
+                                if tid_s:
+                                    tids.append(tid_s)
+                        tids = sorted(set(tids))
+                        # Pace subscriptions in small batches on the same socket.
+                        # This avoids burst subscribe patterns that can trigger 429.
+                        bs = max(1, int(RTDS_MARKET_SUB_BATCH_SIZE))
+                        step = max(0.1, float(RTDS_MARKET_SUB_STEP_SEC))
+                        for i in range(0, len(tids), bs):
+                            chunk = tids[i:i + bs]
+                            try:
+                                await ws.send(json.dumps({
+                                    "action": "subscribe",
+                                    "subscriptions": [{"asset_id": tid, "type": "market"} for tid in chunk]
+                                }))
+                            except Exception:
+                                pass
+                            if i + bs < len(tids):
+                                await asyncio.sleep(step)
 
                     async def pinger():
                         while True:
@@ -4560,15 +4575,6 @@ class LiveTrader:
                                 await ws.send("PING")
                             except Exception:
                                 break
-                            # Force reconnect only on extended silence; avoid reconnect churn.
-                            idle_s = (_time.time() - float(self._rtds_last_msg_ts or 0.0))
-                            if idle_s > max(30.0, RTDS_IDLE_RECONNECT_SEC):
-                                try:
-                                    print(f"{Y}[RTDS]{RS} idle {idle_s:.1f}s -> reconnect", flush=True)
-                                    await ws.close(code=1012, reason="rtds-idle-timeout")
-                                except Exception:
-                                    pass
-                                break
                     pinger_task = asyncio.create_task(pinger())
                     self._rtds_ping_task = pinger_task
 
@@ -4576,7 +4582,11 @@ class LiveTrader:
                         try:
                             raw = await asyncio.wait_for(ws.recv(), timeout=max(5.0, RTDS_RECV_TIMEOUT_SEC))
                         except asyncio.TimeoutError:
-                            raise TimeoutError("RTDS recv timeout")
+                            idle_s = (_time.time() - float(self._rtds_last_msg_ts or 0.0))
+                            if idle_s > max(float(RTDS_HARD_STALE_SEC), float(RTDS_IDLE_RECONNECT_SEC)):
+                                raise TimeoutError(f"RTDS recv stale ({idle_s:.1f}s)")
+                            # Keep the socket alive; avoid reconnect churn on short quiet windows.
+                            continue
                         if not raw: continue
                         self._rtds_last_msg_ts = _time.time()
                         try:
@@ -4663,7 +4673,8 @@ class LiveTrader:
                         max(5.0, RTDS_429_BASE_BACKOFF_SEC) * (2.0 ** min(8, fails - 1)),
                     )
                 else:
-                    wait_s = min(60.0, 2.0 * (2 ** min(5, fails - 1)))
+                    # Non-429 reconnects: still exponential+jitter but less aggressive.
+                    wait_s = min(120.0, 2.0 * (2 ** min(6, fails - 1)))
                 wait_s = wait_s * random.uniform(0.90, 1.25)
                 self._rtds_cooldown_until = max(float(self._rtds_cooldown_until or 0.0), _time.time() + wait_s)
                 if self._noisy_log_enabled("rtds-retry", 5.0):
