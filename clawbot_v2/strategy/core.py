@@ -82,6 +82,13 @@ async def _score_market(self, m: dict) -> dict | None:
     else:
         return None
 
+    # Strict RTDS trading mode: do not open new entries unless RTDS feed is
+    # currently healthy and the selected decision price is RTDS-derived.
+    if bool(RTDS_REQUIRED_FOR_ENTRY):
+        if (not bool(getattr(self, "rtds_ok", False))) or (not str(px_src).startswith("RTDS")):
+            self._skip_tick("rtds_required")
+            return None
+
     open_price = self.open_prices.get(cid)
     if not open_price:
         if LOG_VERBOSE or self._should_log(f"wait-open:{cid}", LOG_OPEN_WAIT_EVERY_SEC):
@@ -1301,7 +1308,7 @@ async def _score_market(self, m: dict) -> dict | None:
         _score_ok = True
         _entry_ok = (0.0 < float(entry) < REGIME_BUCKET_ONLY_ENTRY_MAX)
         if not (_dur_ok and _score_ok and _entry_ok):
-            if self._noisy_log_enabled(f"mode-regime-skip:{asset}:{cid}", LOG_SKIP_EVERY_SEC):
+            if self._noisy_log_enabled(f"mode-regime-skip:{asset}:{cid}", max(8.0, float(LOG_SKIP_EVERY_SEC))):
                 _why = []
                 if not _dur_ok:
                     _why.append("duration")

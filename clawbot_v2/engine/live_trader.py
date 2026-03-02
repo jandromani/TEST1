@@ -4657,12 +4657,25 @@ class LiveTrader:
                 fails = int(getattr(self, "_rtds_fails", 0) or 0) + 1
                 self._rtds_fails = fails
                 if "429" in err_s or "too many requests" in err_s:
+                    self._rtds_429_streak = int(getattr(self, "_rtds_429_streak", 0) or 0) + 1
                     # Upstream throttling: back off harder to recover stable freshness.
                     wait_s = min(
                         max(10.0, RTDS_429_MAX_BACKOFF_SEC),
                         max(5.0, RTDS_429_BASE_BACKOFF_SEC) * (2.0 ** min(8, fails - 1)),
                     )
+                    if self._rtds_429_streak >= max(1, RTDS_429_DISABLE_AFTER):
+                        q_for = max(wait_s, float(RTDS_429_QUARANTINE_SEC))
+                        self._rtds_disabled_until = max(
+                            float(getattr(self, "_rtds_disabled_until", 0.0) or 0.0),
+                            _time.time() + q_for,
+                        )
+                        if self._noisy_log_enabled("rtds-429-quarantine", 10.0):
+                            print(
+                                f"{Y}[RTDS]{RS} 429 quarantine enabled for {q_for:.1f}s "
+                                f"(streak={self._rtds_429_streak})"
+                            )
                 else:
+                    self._rtds_429_streak = 0
                     # Non-429 reconnects: still exponential+jitter but less aggressive.
                     wait_s = min(120.0, 2.0 * (2 ** min(6, fails - 1)))
                 wait_s = wait_s * random.uniform(0.90, 1.25)
@@ -4672,6 +4685,7 @@ class LiveTrader:
                 await asyncio.sleep(wait_s)
             else:
                 self._rtds_fails = 0
+                self._rtds_429_streak = 0
                 self._rtds_cooldown_until = 0.0
             finally:
                 self.rtds_ok = False

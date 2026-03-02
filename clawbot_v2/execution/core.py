@@ -392,7 +392,21 @@ async def evaluate(self, m: dict):
     t0 = _time.perf_counter()
     sig = await self._score_market(m)
     self._perf_update("score_ms", (_time.perf_counter() - t0) * 1000.0)
-    if sig and sig["score"] >= MIN_SCORE_GATE:
+    if not sig:
+        return
+    # Keep execution gate aligned with strategy mode:
+    # in 5m low-cent all-score test, do not reintroduce a hidden hard score block.
+    if (
+        bool(LOWCENT_TEST_ALL_SCORES_5M)
+        and int(sig.get("duration", 0) or 0) <= 5
+        and float(sig.get("entry", 1.0) or 1.0) < float(REGIME_BUCKET_ONLY_ENTRY_MAX)
+    ):
+        await self._execute_trade(sig)
+        return
+    # Default duration-aware floor.
+    min_score = int(MIN_SCORE_GATE_5M if int(sig.get("duration", 0) or 0) <= 5 else MIN_SCORE_GATE_15M)
+    min_score = max(min_score, int(MIN_SCORE_GATE))
+    if int(sig.get("score", 0) or 0) >= min_score:
         await self._execute_trade(sig)
 
 async def _place_order(self, token_id, side, price, size_usdc, asset, duration, mins_left, true_prob=0.5, cl_agree=True, min_edge_req=None, force_taker=False, score=0, pm_book_data=None, use_limit=False, max_entry_allowed=None, hc15_mode=False, hc15_fallback_cap=0.36, core_position=True):
