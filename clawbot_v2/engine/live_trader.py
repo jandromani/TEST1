@@ -439,6 +439,7 @@ RTDS_ENABLE_CHAINLINK = str(os.environ.get("RTDS_ENABLE_CHAINLINK", "0")).strip(
 RTDS_STRICT_ONLY = str(os.environ.get("RTDS_STRICT_ONLY", "1")).strip().lower() in ("1", "true", "yes", "on")
 RTDS_REQUIRED_FOR_ENTRY = str(os.environ.get("RTDS_REQUIRED_FOR_ENTRY", "1")).strip().lower() in ("1", "true", "yes", "on")
 RTDS_FALLBACK_ONLY_MONITOR = str(os.environ.get("RTDS_FALLBACK_ONLY_MONITOR", "1")).strip().lower() in ("1", "true", "yes", "on")
+RTDS_FAILOVER_ENTRY_ENABLED = str(os.environ.get("RTDS_FAILOVER_ENTRY_ENABLED", "0")).strip().lower() in ("1", "true", "yes", "on")
 FEE_RATE_CACHE_TTL_SEC = float(os.environ.get("FEE_RATE_CACHE_TTL_SEC", "900"))
 STATUS_INTERVAL= int(os.environ.get("STATUS_INTERVAL", "15"))
 ONCHAIN_SYNC_SEC = float(os.environ.get("ONCHAIN_SYNC_SEC", "2.0"))
@@ -6312,11 +6313,14 @@ class LiveTrader:
                         # ── Price feed failover: drive self.prices from Binance when RTDS is down/stale ──
                         price = float(data.get("p", 0) or 0)
                         rtds_age = ts - float(self._rtds_asset_ts.get(asset, 0.0) or 0.0)
-                        # In monitor-only mode never use Binance prices for trading decisions.
-                        use_bnb_fallback = (
-                            (not RTDS_FALLBACK_ONLY_MONITOR)
-                            and (not RTDS_STRICT_ONLY)
-                            and ((not self.rtds_ok) or (rtds_age > 3.0))
+                        # RTDS-down failover mode:
+                        # when enabled, allow Binance price feed to drive decisions only while RTDS is down.
+                        allow_failover_price = (
+                            ((not RTDS_FALLBACK_ONLY_MONITOR) and (not RTDS_STRICT_ONLY))
+                            or (RTDS_FAILOVER_ENTRY_ENABLED and (not self.rtds_ok))
+                        )
+                        use_bnb_fallback = allow_failover_price and (
+                            (not self.rtds_ok) or (rtds_age > 3.0 and (not RTDS_STRICT_ONLY))
                         )
                         if price > 0 and use_bnb_fallback:
                             self.prices[asset] = price

@@ -72,22 +72,35 @@ async def _score_market(self, m: dict) -> dict | None:
         quote_age_ms = 0.0   # CL is the resolution oracle; Binance WS freshness irrelevant
     elif rtds_now > 0 and quote_age_ms <= MAX_QUOTE_STALENESS_MS:
         current = rtds_now
-        px_src = "RTDS"
+        src_hint = str(self._price_src.get(asset, "") or "")
+        px_src = src_hint if src_hint else "RTDS"
     elif cl_now > 0:
         current = cl_now
         px_src = "CL-stale"
     elif rtds_now > 0:
         current = rtds_now
-        px_src = "RTDS-stale"
+        src_hint = str(self._price_src.get(asset, "") or "")
+        px_src = f"{src_hint}-stale" if src_hint else "RTDS-stale"
     else:
         return None
 
     # Strict RTDS trading mode: do not open new entries unless RTDS feed is
     # currently healthy and the selected decision price is RTDS-derived.
     if bool(RTDS_REQUIRED_FOR_ENTRY):
-        if (not bool(getattr(self, "rtds_ok", False))) or (not str(px_src).startswith("RTDS")):
-            self._skip_tick("rtds_required")
-            return None
+        rtds_ok_now = bool(getattr(self, "rtds_ok", False))
+        px_s = str(px_src or "")
+        if rtds_ok_now:
+            if not px_s.startswith("RTDS"):
+                self._skip_tick("rtds_required")
+                return None
+        else:
+            # Optional failover mode: allow non-RTDS entries only while RTDS is down.
+            if not bool(RTDS_FAILOVER_ENTRY_ENABLED):
+                self._skip_tick("rtds_required")
+                return None
+            if not (px_s.startswith("BNB") or px_s.startswith("CL")):
+                self._skip_tick("rtds_failover_source_missing")
+                return None
 
     open_price = self.open_prices.get(cid)
     if not open_price:
