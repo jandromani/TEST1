@@ -1362,6 +1362,8 @@ class LiveTrader:
         self._rtds_last_msg_ts = 0.0
         self._rtds_last_connect_try_ts = 0.0
         self._rtds_ping_task = None
+        # Assets already announced as RTDS->Binance failover (avoid repeated noise logs).
+        self._rtds_failover_announced = set()
         self._fee_rate_cache = {}  # token_id -> {"fee_rate_param": float, "ts": float}
         self._redeem_queued_ts = {}  # cid → timestamp when queued for redeem
         self._redeem_verify_counts = {}  # cid → non-claimable verification cycles before auto-close
@@ -4629,6 +4631,10 @@ class LiveTrader:
                                 _now_ts = _time.time()
                                 self._rtds_asset_ts[asset] = _now_ts
                                 self._price_src[asset] = "RTDS"
+                                try:
+                                    self._rtds_failover_announced.discard(asset)
+                                except Exception:
+                                    pass
                                 self.price_history[asset].append((_now_ts, val))
                                 self._tick_update(asset, val, _now_ts)
                                 # Event-driven: evaluate unseen markets immediately on price tick
@@ -6176,7 +6182,8 @@ class LiveTrader:
                             self._price_src[asset] = ("BNB-FB" if not self.rtds_ok else "BNB")
                             self.price_history[asset].append((ts, price))
                             self._tick_update(asset, price, ts)
-                            if (not self.rtds_ok) and self._noisy_log_enabled(f"rtds-failover:{asset}", 20.0):
+                            if (not self.rtds_ok) and (asset not in self._rtds_failover_announced):
+                                self._rtds_failover_announced.add(asset)
                                 print(f"{Y}[RTDS-FAILOVER]{RS} {asset} using Binance aggTrade feed")
                             # Event-driven evaluate (rate-limited) for unseen markets
                             for cid, m in list(self.active_mkts.items()):
