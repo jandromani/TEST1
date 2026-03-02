@@ -4743,12 +4743,13 @@ class LiveTrader:
                 )
                 if is_429:
                     self._rtds_429_streak = int(getattr(self, "_rtds_429_streak", 0) or 0) + 1
+                    self._rtds_non429_streak = 0
                     # Upstream throttling: back off harder to recover stable freshness.
                     retry_after_s = float(info.get("retry_after_s") or 0.0)
                     calc_wait_s = min(
                         max(10.0, RTDS_429_MAX_BACKOFF_SEC),
                         max(5.0, RTDS_429_BASE_BACKOFF_SEC)
-                        * (max(1.05, RTDS_BACKOFF_MULTIPLIER) ** min(8, fails - 1)),
+                        * (max(1.05, RTDS_BACKOFF_MULTIPLIER) ** min(8, int(self._rtds_429_streak) - 1)),
                     )
                     wait_s = max(calc_wait_s, retry_after_s)
                     payload = {
@@ -4775,14 +4776,15 @@ class LiveTrader:
                             )
                 else:
                     self._rtds_429_streak = 0
+                    self._rtds_non429_streak = int(getattr(self, "_rtds_non429_streak", 0) or 0) + 1
                     if "recv stale" in err_s or "timeout" in err_s:
                         self._rtds_timeout_streak = int(getattr(self, "_rtds_timeout_streak", 0) or 0) + 1
                     else:
                         self._rtds_timeout_streak = 0
-                    # Non-429 reconnects: still exponential+jitter but less aggressive.
+                    # Non-429 reconnects: dedicated exponential backoff (max 300s).
                     wait_s = min(
-                        180.0,
-                        2.0 * (max(1.10, RTDS_BACKOFF_MULTIPLIER) ** min(6, fails - 1)),
+                        300.0,
+                        2.0 ** min(8, int(self._rtds_non429_streak)),
                     )
                     if self._rtds_timeout_streak >= max(1, RTDS_TIMEOUTS_BEFORE_RECONNECT):
                         cb_pause = max(60.0, float(RTDS_CIRCUIT_BREAKER_PAUSE_SEC))
@@ -4803,6 +4805,7 @@ class LiveTrader:
             else:
                 self._rtds_fails = 0
                 self._rtds_429_streak = 0
+                self._rtds_non429_streak = 0
                 self._rtds_timeout_streak = 0
                 self._rtds_cooldown_until = 0.0
             finally:
