@@ -537,6 +537,8 @@ CLOB_MARKET_WS_ENABLED = os.environ.get("CLOB_MARKET_WS_ENABLED", "true").lower(
 CLOB_MARKET_WS_SYNC_SEC = float(os.environ.get("CLOB_MARKET_WS_SYNC_SEC", "2.0"))
 CLOB_MARKET_WS_MAX_AGE_MS = float(os.environ.get("CLOB_MARKET_WS_MAX_AGE_MS", "8000"))
 CLOB_MARKET_WS_SOFT_AGE_MS = float(os.environ.get("CLOB_MARKET_WS_SOFT_AGE_MS", "20000"))
+CLOB_WS_RESEED_SEC = float(os.environ.get("CLOB_WS_RESEED_SEC", "3.0"))
+CLOB_WS_NO_MSG_RECONNECT_SEC = float(os.environ.get("CLOB_WS_NO_MSG_RECONNECT_SEC", "35.0"))
 WS_STRICT_ADAPTIVE_ENABLED = os.environ.get("WS_STRICT_ADAPTIVE_ENABLED", "true").lower() == "true"
 WS_STRICT_ADAPTIVE_MULT = float(os.environ.get("WS_STRICT_ADAPTIVE_MULT", "1.35"))
 WS_STRICT_ADAPTIVE_MIN_MS = float(os.environ.get("WS_STRICT_ADAPTIVE_MIN_MS", "5000"))
@@ -1383,6 +1385,7 @@ class LiveTrader:
         # Token ids queued for immediate market-WS subscribe (e.g. newly discovered rounds).
         self._clob_ws_pending_subs = set()
         self._clob_ws_connected_at = 0.0   # timestamp of last successful WS connect
+        self._clob_ws_last_msg_ts = 0.0
         self._heartbeat_last_ok = 0.0
         self._heartbeat_id   = ""
         self._order_event_cache = {}  # order_id -> {"status": str, "filled_size": float, "ts": float}
@@ -5128,6 +5131,7 @@ class LiveTrader:
         import websockets as _ws
         delay = 2
         _conn_start = 0.0
+        _last_reseed = 0.0
         while True:
             try:
                 async with _ws.connect(
@@ -5140,6 +5144,7 @@ class LiveTrader:
                     self._clob_market_ws = ws
                     self._clob_ws_assets_subscribed = set()
                     self._clob_ws_connected_at = _time.time()
+                    self._clob_ws_last_msg_ts = self._clob_ws_connected_at
                     print(f"{G}[CLOB-WS] market connected{RS}")
                     _conn_start = _time.time()
                     delay = 2
@@ -5176,14 +5181,33 @@ class LiveTrader:
                                 # quickly at round rollover (prevents ws_age=9e9 gaps).
                                 raw = await asyncio.wait_for(ws.recv(), timeout=0.5)
                             except asyncio.TimeoutError:
+                                now_t = _time.time()
+                                # If feed is silent, reseed stale tokens from REST to keep books fresh.
+                                if (now_t - _last_reseed) >= max(1.0, CLOB_WS_RESEED_SEC):
+                                    _last_reseed = now_t
+                                    tids = list(self._trade_focus_token_ids() or self._active_token_ids())
+                                    if tids:
+                                        stale_ids = [
+                                            tid for tid in tids
+                                            if self._clob_ws_book_age_ms(tid) > CLOB_MARKET_WS_MAX_AGE_MS
+                                        ]
+                                        if stale_ids:
+                                            asyncio.ensure_future(self._bootstrap_ws_books(set(stale_ids[:8])))
+                                # Force reconnect if socket stays open but no messages arrive for too long.
+                                if (now_t - float(self._clob_ws_last_msg_ts or 0.0)) >= max(10.0, CLOB_WS_NO_MSG_RECONNECT_SEC):
+                                    raise RuntimeError(
+                                        f"CLOB-WS no messages for {(now_t - float(self._clob_ws_last_msg_ts or 0.0)):.1f}s"
+                                    )
                                 continue
                             try:
                                 msg = json.loads(raw)
                             except Exception:
                                 # Server may return plain-text PONG to app heartbeat.
                                 if str(raw).strip().upper() == "PONG":
+                                    self._clob_ws_last_msg_ts = _time.time()
                                     continue
                                 continue
+                            self._clob_ws_last_msg_ts = _time.time()
                             rows = msg if isinstance(msg, list) else [msg]
                             for row in rows:
                                 if isinstance(row, dict) and isinstance(row.get("data"), (list, dict)):
@@ -5218,7 +5242,14 @@ class LiveTrader:
         ws_book = self._get_clob_ws_book(token_id, max_age_ms=CLOB_MARKET_WS_MAX_AGE_MS)
         if ws_book is not None:
             return ws_book
-        if not CLOB_REST_FALLBACK_ENABLED:
+        # Keep data continuity even when WS is connected-but-stale:
+        # in no-gates / WS-required modes allow REST snapshot reseed regardless of static flag.
+        allow_rest_fallback = (
+            CLOB_REST_FALLBACK_ENABLED
+            or NO_GATES_MODE
+            or REQUIRE_ORDERBOOK_WS
+        )
+        if not allow_rest_fallback:
             return None
         loop = asyncio.get_running_loop()
         try:

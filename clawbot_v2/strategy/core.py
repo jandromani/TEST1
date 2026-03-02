@@ -317,14 +317,14 @@ async def _score_market(self, m: dict) -> dict | None:
                         f"(age={ws_age_pref:.0f}ms) — strict/REST unavailable"
                     )
             else:
-                if self._noisy_log_enabled(f"skip-no-ws-book:{asset}:{cid}", LOG_SKIP_EVERY_SEC):
+                if LOG_VERBOSE and self._noisy_log_enabled(f"skip-no-ws-book:{asset}:{cid}", LOG_SKIP_EVERY_SEC):
                     ws_age_pref = self._clob_ws_book_age_ms(prefetch_token)
                     print(
-                        f"{Y}[SKIP] {asset} {duration}m missing fresh CLOB WS book "
-                        f"(ws_age={ws_age_pref:.0f}ms pm_age={pm_age_ms:.0f}ms){RS}"
+                        f"{Y}[BOOK-INFO]{RS} {asset} {duration}m missing fresh CLOB WS book "
+                        f"(ws_age={ws_age_pref:.0f}ms pm_age={pm_age_ms:.0f}ms)"
                     )
                 # Non-blocking in aggressive mode: continue scoring even without fresh WS book.
-                if self._noisy_log_enabled(f"book-missing-info:{asset}:{cid}", LOG_SKIP_EVERY_SEC):
+                if LOG_VERBOSE and self._noisy_log_enabled(f"book-missing-info:{asset}:{cid}", LOG_SKIP_EVERY_SEC):
                     print(
                         f"{Y}[BOOK-INFO]{RS} {asset} {duration}m missing fresh CLOB WS book "
                         f"(non-blocking)"
