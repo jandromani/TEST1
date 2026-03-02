@@ -1788,7 +1788,35 @@ async def _score_market(self, m: dict) -> dict | None:
                 f"< target={min_ev_req:.3f} (non-blocking)"
             )
 
-    # Block only deeply negative mature buckets to improve WR/PnL regime quality.
+    # Block losing buckets based on realized outcomes (5m + 15m).
+    # 5m guard is intentionally stricter because current live losses cluster there.
+    if duration == 5 and (not booster_eval) and BUCKET_HARD_BLOCK_5M_ENABLED:
+        bkey = self._bucket_key(duration, score, entry)
+        br = self._bucket_stats.rows.get(bkey)
+        if br:
+            outcomes_b = int(br.get("outcomes", 0) or 0)
+            if outcomes_b >= BUCKET_HARD_BLOCK_5M_MIN_OUTCOMES:
+                wins_b = int(br.get("wins", 0) or 0)
+                wr_b = (wins_b / outcomes_b) if outcomes_b > 0 else 0.0
+                gw_b = float(br.get("gross_win", 0.0) or 0.0)
+                gl_b = float(br.get("gross_loss", 0.0) or 0.0)
+                pnl_b = float(br.get("pnl", 0.0) or 0.0)
+                if gl_b > 1e-9:
+                    pf_b = gw_b / gl_b
+                elif gw_b > 0:
+                    pf_b = 99.0
+                else:
+                    pf_b = 0.0
+                if (pf_b <= BUCKET_HARD_BLOCK_5M_MAX_PF and wr_b <= BUCKET_HARD_BLOCK_5M_MAX_WR) or (pnl_b <= BUCKET_HARD_BLOCK_5M_MAX_PNL):
+                    if self._noisy_log_enabled(f"skip-bucket-hard5m:{asset}:{bkey}", LOG_SKIP_EVERY_SEC):
+                        print(
+                            f"{Y}[BUCKET-BLOCK-5M]{RS} {asset} {bkey} "
+                            f"pf={pf_b:.2f} wr={wr_b*100:.1f}% pnl={pnl_b:+.2f} n={outcomes_b}"
+                        )
+                    self._skip_tick("bucket_pf_blocked")
+                    return None
+
+    # Legacy mature-bucket block for 15m.
     if duration >= 15 and (not booster_eval) and BUCKET_HARD_BLOCK_ENABLED:
         bkey = self._bucket_key(duration, score, entry)
         br = self._bucket_stats.rows.get(bkey)

@@ -485,6 +485,12 @@ BUCKET_HARD_BLOCK_ENABLED = os.environ.get("BUCKET_HARD_BLOCK_ENABLED", "true").
 BUCKET_HARD_BLOCK_MIN_OUTCOMES = int(os.environ.get("BUCKET_HARD_BLOCK_MIN_OUTCOMES", "45"))
 BUCKET_HARD_BLOCK_MAX_PF = float(os.environ.get("BUCKET_HARD_BLOCK_MAX_PF", "0.72"))
 BUCKET_HARD_BLOCK_MAX_WR = float(os.environ.get("BUCKET_HARD_BLOCK_MAX_WR", "0.46"))
+# Dedicated 5m loser-bucket guard (more aggressive than legacy 15m thresholds).
+BUCKET_HARD_BLOCK_5M_ENABLED = os.environ.get("BUCKET_HARD_BLOCK_5M_ENABLED", "true").lower() == "true"
+BUCKET_HARD_BLOCK_5M_MIN_OUTCOMES = int(os.environ.get("BUCKET_HARD_BLOCK_5M_MIN_OUTCOMES", "20"))
+BUCKET_HARD_BLOCK_5M_MAX_PF = float(os.environ.get("BUCKET_HARD_BLOCK_5M_MAX_PF", "0.95"))
+BUCKET_HARD_BLOCK_5M_MAX_WR = float(os.environ.get("BUCKET_HARD_BLOCK_5M_MAX_WR", "0.45"))
+BUCKET_HARD_BLOCK_5M_MAX_PNL = float(os.environ.get("BUCKET_HARD_BLOCK_5M_MAX_PNL", "-0.01"))
 LOSS_STREAK_PAUSE_ENABLED = os.environ.get("LOSS_STREAK_PAUSE_ENABLED", "false").lower() == "true"
 LOSS_STREAK_PAUSE_N = int(os.environ.get("LOSS_STREAK_PAUSE_N", "3"))     # tightened 4→3
 LOSS_STREAK_PAUSE_SEC = float(os.environ.get("LOSS_STREAK_PAUSE_SEC", "1800"))  # 900→1800s

@@ -348,10 +348,11 @@ async def _redeem_loop(self):
                     rk_n = self._count_pending_redeem_by_rk(rk)
                     usdc_delta = usdc_after - usdc_before
                     tag = "[WIN-RECONCILE]" if reconcile_only else "[WIN]"
+                    bkt = str(trade.get("bucket", "unknown") or "unknown")
                     print(f"{G}{tag}{RS} {asset} {side} {trade.get('duration',0)}m | "
                           f"{G}${pnl:+.2f}{RS} | stake=${stake_out:.2f} redeem=${redeem_in:.2f} "
                           f"| rk_trades={rk_n} | Bank ${self.bankroll:.2f} | WR {wr} | "
-                          f"{suffix} | rk={rk} cid={self._short_cid(cid)}")
+                          f"bucket={bkt} | {suffix} | rk={rk} cid={self._short_cid(cid)}")
                     if not reconcile_only:
                         print(
                             f"{B}[OUTCOME-STATS]{RS} {asset} {side} {trade.get('duration',0)}m "
@@ -439,10 +440,11 @@ async def _redeem_loop(self):
                         wr = f"{self.wins/self.total*100:.0f}%" if self.total else "–"
                         rk_n = self._count_pending_redeem_by_rk(rk)
                         tag = "[LOSS-RECONCILE]" if reconcile_only else "[LOSS]"
+                        bkt = str(trade.get("bucket", "unknown") or "unknown")
                         print(f"{R}{tag}{RS} {asset} {side} {trade.get('duration',0)}m | "
                               f"{R}${pnl:+.2f}{RS} | stake=${stake_loss:.2f} redeem=$0.00 "
                               f"| rk_trades={rk_n} | Bank ${self.bankroll:.2f} | WR {wr} | "
-                              f"rk={rk} cid={self._short_cid(cid)}")
+                              f"bucket={bkt} | rk={rk} cid={self._short_cid(cid)}")
                         if not reconcile_only:
                             print(
                                 f"{B}[OUTCOME-STATS]{RS} {asset} {side} {trade.get('duration',0)}m "
