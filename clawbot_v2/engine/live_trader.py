@@ -413,16 +413,25 @@ MARKET_REFRESH_SEC = float(os.environ.get("MARKET_REFRESH_SEC", "30.0"))  # how 
 PING_INTERVAL  = float(os.environ.get("RTDS_PING_INTERVAL_SEC", os.environ.get("PING_INTERVAL", "5")))
 RTDS_RECV_TIMEOUT_SEC = float(os.environ.get("RTDS_RECV_TIMEOUT_SEC", "75.0"))
 RTDS_IDLE_RECONNECT_SEC = float(os.environ.get("RTDS_IDLE_RECONNECT_SEC", "120.0"))
-RTDS_CONNECT_MIN_GAP_SEC = float(os.environ.get("RTDS_CONNECT_MIN_GAP_SEC", "3.0"))
+RTDS_CONNECT_MIN_GAP_SEC = float(os.environ.get("RTDS_CONNECT_MIN_GAP_SEC", "5.0"))
 RTDS_CONNECT_JITTER_SEC = float(os.environ.get("RTDS_CONNECT_JITTER_SEC", "1.5"))
 RTDS_429_BASE_BACKOFF_SEC = float(os.environ.get("RTDS_429_BASE_BACKOFF_SEC", "120.0"))
 RTDS_429_MAX_BACKOFF_SEC = float(os.environ.get("RTDS_BACKOFF_MAX_SEC", os.environ.get("RTDS_429_MAX_BACKOFF_SEC", "1800.0")))
-RTDS_BACKOFF_MULTIPLIER = float(os.environ.get("RTDS_BACKOFF_MULTIPLIER", "2.0"))
-RTDS_JITTER_FACTOR = float(os.environ.get("RTDS_JITTER_FACTOR", "0.30"))
+RTDS_BACKOFF_MULTIPLIER = float(
+    os.environ.get(
+        "RTDS_429_BACKOFF_MULTIPLIER",
+        os.environ.get("RTDS_BACKOFF_MULTIPLIER", "1.5"),
+    )
+)
+RTDS_JITTER_FACTOR = float(os.environ.get("RTDS_JITTER_PCT", os.environ.get("RTDS_JITTER_FACTOR", "0.25")))
 RTDS_429_QUARANTINE_SEC = float(os.environ.get("RTDS_429_QUARANTINE_SEC", "900.0"))
 RTDS_429_DISABLE_AFTER = int(os.environ.get("RTDS_429_DISABLE_AFTER", "6"))
 RTDS_HARD_STALE_SEC = float(os.environ.get("RTDS_HARD_STALE_SEC", "300.0"))
-RTDS_TIMEOUTS_BEFORE_RECONNECT = int(os.environ.get("RTDS_TIMEOUTS_BEFORE_RECONNECT", "6"))
+RTDS_TIMEOUTS_BEFORE_RECONNECT = int(
+    os.environ.get("RTDS_MAX_CONSECUTIVE_TIMEOUTS", os.environ.get("RTDS_TIMEOUTS_BEFORE_RECONNECT", "6"))
+)
+RTDS_CIRCUIT_BREAKER_PAUSE_SEC = float(os.environ.get("RTDS_CIRCUIT_BREAKER_PAUSE_SEC", "900.0"))
+RTDS_USER_AGENT = str(os.environ.get("RTDS_USER_AGENT", "ClawdBot/1.0 (stable reconnect)")).strip()
 RTDS_MARKET_SUB_BATCH_SIZE = int(os.environ.get("RTDS_MARKET_SUB_BATCH_SIZE", "20"))
 RTDS_MARKET_SUB_STEP_SEC = float(os.environ.get("RTDS_MARKET_SUB_STEP_SEC", "0.35"))
 RTDS_ENABLE_MARKET_SUBS = str(os.environ.get("RTDS_ENABLE_MARKET_SUBS", "0")).strip().lower() in ("1", "true", "yes", "on")
@@ -4581,8 +4590,11 @@ class LiveTrader:
             self._rtds_last_connect_try_ts = _time.time()
             pinger_task = None
             try:
+                _headers = {"Origin": "https://polymarket.com"}
+                if RTDS_USER_AGENT:
+                    _headers["User-Agent"] = RTDS_USER_AGENT
                 async with websockets.connect(
-                    RTDS, additional_headers={"Origin": "https://polymarket.com"},
+                    RTDS, additional_headers=_headers,
                     ping_interval=None,
                     compression=None,
                 ) as ws:
@@ -4596,6 +4608,7 @@ class LiveTrader:
                     self._rtds_ws = ws   # expose for dynamic market subscriptions
                     self._rtds_fails = 0
                     self._rtds_429_streak = 0
+                    self._rtds_timeout_streak = 0
                     self._rtds_disabled_until = 0.0
                     self._rtds_cooldown_until = 0.0
                     self._rtds_last_msg_ts = _time.time()
@@ -4762,11 +4775,25 @@ class LiveTrader:
                             )
                 else:
                     self._rtds_429_streak = 0
+                    if "recv stale" in err_s or "timeout" in err_s:
+                        self._rtds_timeout_streak = int(getattr(self, "_rtds_timeout_streak", 0) or 0) + 1
+                    else:
+                        self._rtds_timeout_streak = 0
                     # Non-429 reconnects: still exponential+jitter but less aggressive.
                     wait_s = min(
                         180.0,
                         2.0 * (max(1.10, RTDS_BACKOFF_MULTIPLIER) ** min(6, fails - 1)),
                     )
+                    if self._rtds_timeout_streak >= max(1, RTDS_TIMEOUTS_BEFORE_RECONNECT):
+                        cb_pause = max(60.0, float(RTDS_CIRCUIT_BREAKER_PAUSE_SEC))
+                        self._rtds_cooldown_until = max(
+                            float(self._rtds_cooldown_until or 0.0),
+                            _time.time() + cb_pause,
+                        )
+                        wait_s = max(wait_s, cb_pause)
+                        self._rtds_timeout_streak = 0
+                        if self._noisy_log_enabled("rtds-circuit-breaker", 10.0):
+                            print(f"{Y}[RTDS]{RS} circuit-breaker pause {cb_pause:.1f}s after repeated timeouts")
                 _jf = max(0.0, min(0.90, RTDS_JITTER_FACTOR))
                 wait_s = wait_s * random.uniform(1.0 - _jf, 1.0 + _jf)
                 self._rtds_cooldown_until = max(float(self._rtds_cooldown_until or 0.0), _time.time() + wait_s)
@@ -4776,6 +4803,7 @@ class LiveTrader:
             else:
                 self._rtds_fails = 0
                 self._rtds_429_streak = 0
+                self._rtds_timeout_streak = 0
                 self._rtds_cooldown_until = 0.0
             finally:
                 self.rtds_ok = False
