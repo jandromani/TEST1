@@ -1349,7 +1349,7 @@ class LiveTrader:
         self.pending_redeem  = {}   # cid → (side, asset)  — waiting on-chain resolution
         self.redeemed_cids   = set()  # cids already processed — prevents _redeemable_scan re-queueing
         self.token_prices    = {}     # token_id → real-time price from RTDS market stream
-        self._rtds_asset_ts  = {}     # asset -> last RTDS crypto_prices tick ts
+        self._rtds_asset_ts  = {}     # asset -> last direct RTDS crypto_prices tick ts (no fallbacks)
         self._price_src = {}          # asset -> "RTDS" | "CL" | "CL-FB"
         self._rtds_ws        = None   # live WebSocket handle for dynamic subscriptions
         self._rtds_fails = 0
@@ -6162,14 +6162,17 @@ class LiveTrader:
                         ts     = _t.time()
                         self.binance_cache[asset]["agg_ofi_buf"].append((ts, is_buy, qty))
                         self.binance_cache[asset]["agg_ts"] = ts
-                        # ── Price feed: drive self.prices when RTDS is stale (>3s) ─────────────
+                        # ── Price feed failover: drive self.prices from Binance when RTDS is down/stale ──
                         price = float(data.get("p", 0) or 0)
-                        if price > 0 and (ts - float(self._rtds_asset_ts.get(asset, 0.0) or 0.0)) > 3.0:
+                        rtds_age = ts - float(self._rtds_asset_ts.get(asset, 0.0) or 0.0)
+                        use_bnb_fallback = (not self.rtds_ok) or (rtds_age > 3.0)
+                        if price > 0 and use_bnb_fallback:
                             self.prices[asset] = price
-                            self._rtds_asset_ts[asset] = ts
-                            self._price_src[asset] = "BNB"
+                            self._price_src[asset] = ("BNB-FB" if not self.rtds_ok else "BNB")
                             self.price_history[asset].append((ts, price))
                             self._tick_update(asset, price, ts)
+                            if (not self.rtds_ok) and self._noisy_log_enabled(f"rtds-failover:{asset}", 20.0):
+                                print(f"{Y}[RTDS-FAILOVER]{RS} {asset} using Binance aggTrade feed")
                             # Event-driven evaluate (rate-limited) for unseen markets
                             for cid, m in list(self.active_mkts.items()):
                                 if m.get("asset") != asset: continue
@@ -7632,7 +7635,9 @@ class LiveTrader:
             # Max-PF decision rule: rank by executable EV only.
             # execution_ev already includes fee/slippage/no-fill penalties.
             entry = max(float(sig.get("entry", 0.5)), 1e-6)
-            _fee_dyn = max(0.001, entry * (1.0 - entry) * 0.0624)
+            _fee_dyn = float(sig.get("fee_effective_ratio", 0.0) or 0.0)
+            if _fee_dyn <= 0.0:
+                _fee_dyn = max(0.001, entry * (1.0 - entry) * 0.0624)
             return float(
                 sig.get(
                     "execution_ev",
@@ -7650,7 +7655,9 @@ class LiveTrader:
         edge = float(sig.get("edge", 0.0))
         cl_bonus = 0.02 if sig.get("cl_agree", True) else -0.03
         payout = (1.0 / entry) - 1.0
-        _fee_dyn_sg = max(0.001, entry * (1.0 - entry) * 0.0624)  # parabolic fee model (peaks at 0.50)
+        _fee_dyn_sg = float(sig.get("fee_effective_ratio", 0.0) or 0.0)
+        if _fee_dyn_sg <= 0.0:
+            _fee_dyn_sg = max(0.001, entry * (1.0 - entry) * 0.0624)  # legacy fallback
         ev_net = float(sig.get("execution_ev", (float(sig.get("true_prob", 0.5)) / entry) - 1.0 - _fee_dyn_sg))
         q_age = float(sig.get("quote_age_ms", 0.0) or 0.0)
         s_lat = float(sig.get("signal_latency_ms", 0.0) or 0.0)
@@ -8659,8 +8666,11 @@ class LiveTrader:
                         selected = filtered
                 if ROUND_BEST_ONLY and valid:
                     best_5m = max((s for s in valid if s.get("duration", 0) <= 5), key=self._signal_growth_score, default=None)
-                    best_15m = max((s for s in valid if s.get("duration", 0) > 5), key=self._signal_growth_score, default=None)
-                    selected = [s for s in (best_5m, best_15m) if s is not None]
+                    if ONLY_5M_MODE:
+                        selected = [s for s in (best_5m,) if s is not None]
+                    else:
+                        best_15m = max((s for s in valid if s.get("duration", 0) > 5), key=self._signal_growth_score, default=None)
+                        selected = [s for s in (best_5m, best_15m) if s is not None]
                     if selected:
                         picks = " | ".join(
                             f"{s['asset']} {s['duration']}m {s['side']} g={self._signal_growth_score(s):+.3f}"
@@ -8679,7 +8689,7 @@ class LiveTrader:
                             self._last_round_pick_ts = now_log
                             print(f"{B}[ROUND-PICK]{RS} {picks}")
                 consensus_side_15m = None
-                if ROUND_CONSENSUS_15M_ENABLED:
+                if ROUND_CONSENSUS_15M_ENABLED and (not ONLY_5M_MODE):
                     up_votes = 0
                     dn_votes = 0
                     move_sum = 0.0
