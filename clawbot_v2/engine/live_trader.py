@@ -4707,8 +4707,17 @@ class LiveTrader:
             except Exception as e:
                 self.rtds_ok = False
                 self._rtds_ws = None
-                print(f"{R}[RTDS] Reconnect: {e}{RS}")
                 info = self._extract_rtds_error_info(e)
+                reconnect_payload = {
+                    "ts": datetime.now(timezone.utc).isoformat(),
+                    "error": info.get("error", str(e)),
+                    "status": info.get("status"),
+                    "retry_after_s": info.get("retry_after_s"),
+                }
+                print(
+                    f"{R}[RTDS] Reconnect{RS} "
+                    + json.dumps(reconnect_payload, separators=(",", ":"), ensure_ascii=True)
+                )
                 err_s = str(e).lower()
                 status_code = int(info.get("status") or 0)
                 fails = int(getattr(self, "_rtds_fails", 0) or 0) + 1
