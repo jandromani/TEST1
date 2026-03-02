@@ -191,17 +191,22 @@ async def _execute_trade(self, sig: dict):
             min_high_payout_entry = max(0.01, min(0.95, NO_GATES_ENTRY_MIN))
             max_high_payout_entry = max(min_high_payout_entry, min(0.95, NO_GATES_ENTRY_MAX))
             sig_entry = float(sig.get("entry", 0.0) or 0.0)
-            if sig_entry <= 0.0 or sig_entry < min_high_payout_entry or sig_entry > max_high_payout_entry:
-                print(
-                    f"{Y}[SKIP]{RS} {sig.get('asset','?')} {sig.get('duration',0)}m {sig.get('side','?')} "
-                    f"entry={sig_entry:.3f} outside no-gates range=[{min_high_payout_entry:.3f},{max_high_payout_entry:.3f}]"
-                )
-                return
+            if sig_entry <= 0.0:
+                sig_entry = min_high_payout_entry
+            if sig_entry < min_high_payout_entry or sig_entry > max_high_payout_entry:
+                # Non-blocking in no-gates mode: clip entry into configured range.
+                clipped = max(min_high_payout_entry, min(max_high_payout_entry, sig_entry))
+                if self._noisy_log_enabled(f"no-gates-entry-clip:{sig.get('asset','?')}:{sig.get('side','?')}", LOG_SKIP_EVERY_SEC):
+                    print(
+                        f"{Y}[ENTRY-INFO]{RS} {sig.get('asset','?')} {sig.get('duration',0)}m {sig.get('side','?')} "
+                        f"entry={sig_entry:.3f} -> {clipped:.3f} no-gates range=[{min_high_payout_entry:.3f},{max_high_payout_entry:.3f}]"
+                    )
+                sig["entry"] = clipped
             sig["max_entry_allowed"] = min(
                 float(sig.get("max_entry_allowed", 0.99) or 0.99),
                 max_high_payout_entry
             )
-        if self._noisy_log_enabled(f"side-check:{sig.get('asset','?')}:{sig.get('cid','')}", LOG_FLOW_EVERY_SEC):
+        if LOG_VERBOSE and self._noisy_log_enabled(f"side-check:{sig.get('asset','?')}:{sig.get('cid','')}", LOG_FLOW_EVERY_SEC):
             print(
                 f"{B}[SIDE-CHECK]{RS} OK {sig.get('asset','?')} {sig.get('duration',0)}m "
                 f"side={sig.get('side','?')} token={actual_token[:10]}.. "

@@ -218,7 +218,7 @@ async def _score_market(self, m: dict) -> dict | None:
             score -= div_pen
             edge -= min(DIV_PEN_EDGE_CAP, div * DIV_PEN_EDGE_MULT)
             data_div_pen_applied = True
-            if self._noisy_log_enabled(f"data-div:{asset}:{duration}", LOG_FLOW_EVERY_SEC):
+            if LOG_VERBOSE and self._noisy_log_enabled(f"data-div:{asset}:{duration}", LOG_FLOW_EVERY_SEC):
                 print(
                     f"{Y}[DATA-DIV]{RS} {asset} {duration}m cl={cl_now:.4f} rtds={rtds_now:.4f} "
                     f"open={open_price:.4f} div={div*100:.3f}% (-{div_pen} score)"
@@ -361,10 +361,15 @@ async def _score_market(self, m: dict) -> dict | None:
     cache_a = self.binance_cache.get(asset, {})
     volume_ready = bool(cache_a.get("depth_bids")) and bool(cache_a.get("depth_asks")) and (len(cache_a.get("klines", [])) >= CACHE_MIN_KLINES)
     if REQUIRE_VOLUME_SIGNAL and not volume_ready:
-        if self._noisy_log_enabled(f"skip-no-vol:{asset}:{cid}", LOG_SKIP_EVERY_SEC):
-            print(f"{Y}[SKIP] {asset} {duration}m missing live Binance depth/volume cache{RS}")
-        self._skip_tick("volume_missing")
-        return None
+        if NO_GATES_MODE:
+            # No-gates mode: do not hard-block, just reduce confidence.
+            score -= 2
+            edge -= 0.006
+        else:
+            if self._noisy_log_enabled(f"skip-no-vol:{asset}:{cid}", LOG_SKIP_EVERY_SEC):
+                print(f"{Y}[SKIP] {asset} {duration}m missing live Binance depth/volume cache{RS}")
+            self._skip_tick("volume_missing")
+            return None
 
     # Jump detection: sudden move against our direction = hard abort
     if is_jump and jump_dir is not None and jump_dir != direction:
@@ -376,16 +381,28 @@ async def _score_market(self, m: dict) -> dict | None:
     # Correlated assets (ETH 0.82, SOL 0.80, XRP 0.78) should not bet against BTC momentum.
     if BTC_DIR_GATE_ENABLED and asset != "BTC" and duration >= 15:
         if btc_lead_p > BTC_DIR_GATE_UP and not is_up:
-            self._skip_tick("btc_dir_gate_dn")
-            return None
+            if NO_GATES_MODE:
+                score -= 2
+                edge -= 0.006
+            else:
+                self._skip_tick("btc_dir_gate_dn")
+                return None
         if btc_lead_p < BTC_DIR_GATE_DN and is_up:
-            self._skip_tick("btc_dir_gate_up")
-            return None
+            if NO_GATES_MODE:
+                score -= 2
+                edge -= 0.006
+            else:
+                self._skip_tick("btc_dir_gate_up")
+                return None
 
     # Order book imbalance — depth-weighted 1/rank (more reliable than flat sum)
     ob_sig = dw_ob if is_up else -dw_ob    # positive = OB confirms direction
     if ob_sig < OB_HARD_BLOCK:
-        return None    # extreme contra OB — hard block
+        if NO_GATES_MODE:
+            score -= 3
+            edge -= 0.010
+        else:
+            return None    # extreme contra OB — hard block
     if   ob_sig > OB_SCORE_T3: score += 3
     elif ob_sig > OB_SCORE_T2: score += 2
     elif ob_sig > OB_SCORE_T1: score += 1
@@ -708,7 +725,7 @@ async def _score_market(self, m: dict) -> dict | None:
     recent_side_edge_adj = float(recent_side.get("edge_adj", 0.0) or 0.0)
     recent_side_prob_adj = float(recent_side.get("prob_adj", 0.0) or 0.0)
     # Recent-side kept for diagnostics only; no direct score/edge impact.
-    if self._noisy_log_enabled(f"recent-side:{asset}:{side}", LOG_FLOW_EVERY_SEC):
+    if LOG_VERBOSE and self._noisy_log_enabled(f"recent-side:{asset}:{side}", LOG_FLOW_EVERY_SEC):
         print(
             f"{B}[RECENT-SIDE]{RS} {asset} {duration}m {side} "
             f"adj(score={recent_side_score_adj:+d},edge={recent_side_edge_adj:+.3f},prob={recent_side_prob_adj:+.3f}) "
@@ -726,7 +743,7 @@ async def _score_market(self, m: dict) -> dict | None:
             score += aq_score
             edge += aq_edge
             true_prob = max(0.05, min(0.95, true_prob + aq_prob))
-            if self._noisy_log_enabled(f"onchain-q:{asset}:{duration}:{side}", LOG_FLOW_EVERY_SEC):
+            if LOG_VERBOSE and self._noisy_log_enabled(f"onchain-q:{asset}:{duration}:{side}", LOG_FLOW_EVERY_SEC):
                 print(
                     f"{B}[ONCHAIN-Q]{RS} {asset} {duration}m {side} "
                     f"band={aq.get('band','?')} n={int(aq.get('n',0) or 0)} "
@@ -1869,7 +1886,7 @@ async def _score_market(self, m: dict) -> dict | None:
                 )
             self._skip_tick("lowcent_new_weak")
             return None
-    if self._noisy_log_enabled("flow-thresholds", LOG_FLOW_EVERY_SEC):
+    if LOG_VERBOSE and self._noisy_log_enabled("flow-thresholds", LOG_FLOW_EVERY_SEC):
         print(
             f"{B}[FLOW]{RS} "
             f"payout>={base_min_payout_req:.3f}x→{min_payout_req:.3f}x "
