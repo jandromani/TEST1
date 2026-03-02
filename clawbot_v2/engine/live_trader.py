@@ -5168,24 +5168,51 @@ class LiveTrader:
                                 break
                     hb_task = asyncio.create_task(_app_heartbeat())
                     try:
+                        init_done = False
                         while True:
                             desired = (self._trade_focus_token_ids() or self._active_token_ids()) | set(self._clob_ws_pending_subs)
                             add = desired - self._clob_ws_assets_subscribed
-                            if add:
+                            rem = self._clob_ws_assets_subscribed - desired
+                            if desired and not init_done:
+                                # Initial subscription message per docs.
                                 await ws.send(
                                     json.dumps(
                                         {
-                                            "assets_ids": sorted(add),
                                             "type": "market",
+                                            "assets_ids": sorted(desired),
                                             "custom_feature_enabled": True,
                                         }
                                     )
                                 )
-                                self._clob_ws_assets_subscribed |= set(add)
-                                self._clob_ws_pending_subs -= set(add)
-                                # Seed WS cache from REST immediately — avoids 8s staleness gap
-                                # while waiting for Polymarket to send the initial book snapshot.
-                                asyncio.ensure_future(self._bootstrap_ws_books(set(add)))
+                                self._clob_ws_assets_subscribed = set(desired)
+                                self._clob_ws_pending_subs -= set(desired)
+                                init_done = True
+                                asyncio.ensure_future(self._bootstrap_ws_books(set(desired)))
+                            else:
+                                if add:
+                                    # Dynamic subscribe per docs.
+                                    await ws.send(
+                                        json.dumps(
+                                            {
+                                                "assets_ids": sorted(add),
+                                                "operation": "subscribe",
+                                            }
+                                        )
+                                    )
+                                    self._clob_ws_assets_subscribed |= set(add)
+                                    self._clob_ws_pending_subs -= set(add)
+                                    asyncio.ensure_future(self._bootstrap_ws_books(set(add)))
+                                if rem:
+                                    # Dynamic unsubscribe to keep feed light and avoid server throttling.
+                                    await ws.send(
+                                        json.dumps(
+                                            {
+                                                "assets_ids": sorted(rem),
+                                                "operation": "unsubscribe",
+                                            }
+                                        )
+                                    )
+                                    self._clob_ws_assets_subscribed -= set(rem)
                             try:
                                 # Keep a short poll interval so new-token subscriptions are flushed
                                 # quickly at round rollover (prevents ws_age=9e9 gaps).
@@ -8357,24 +8384,17 @@ class LiveTrader:
                                 f"— continuing with per-market freshness checks"
                             )
 
-            # Subscribe new markets to RTDS token price stream.
-            # Also queue token ids for immediate CLOB market-WS subscription.
-            if self._rtds_ws:
-                for cid, m in markets.items():
-                    if cid not in self.active_mkts:
-                        for tid in [m.get("token_up",""), m.get("token_down","")]:
-                            if tid:
-                                try:
-                                    await self._rtds_ws.send(json.dumps({
-                                        "action": "subscribe",
-                                        "subscriptions": [{"asset_id": tid, "type": "market"}]
-                                    }))
-                                except Exception:
-                                    pass
-                                try:
-                                    self._clob_ws_pending_subs.add(str(tid))
-                                except Exception:
-                                    pass
+            # Queue token ids for immediate CLOB market-WS subscription.
+            # Keep this decoupled from RTDS state: CLOB orderbook must stay fresh
+            # even when RTDS is throttled/reconnecting.
+            for cid, m in markets.items():
+                if cid not in self.active_mkts:
+                    for tid in [m.get("token_up", ""), m.get("token_down", "")]:
+                        if tid:
+                            try:
+                                self._clob_ws_pending_subs.add(str(tid))
+                            except Exception:
+                                pass
 
             # Prefetch Polymarket open prices in parallel to avoid sequential stalls.
             pm_open_tasks = {}
