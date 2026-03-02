@@ -4510,9 +4510,13 @@ class LiveTrader:
                     ping_interval=None,
                     compression=None,
                 ) as ws:
+                    # RTDS spec: subscribe using explicit topic/type pairs.
                     await ws.send(json.dumps({
                         "action": "subscribe",
-                        "subscriptions": [{"topic": "crypto_prices", "type": "update"}]
+                        "subscriptions": [
+                            {"topic": "crypto_prices", "type": "update"},
+                            {"topic": "crypto_prices_chainlink", "type": "*", "filters": ""},
+                        ]
                     }))
                     self.rtds_ok = True
                     self._rtds_ws = ws   # expose for dynamic market subscriptions
@@ -4539,12 +4543,10 @@ class LiveTrader:
                         while True:
                             await asyncio.sleep(PING_INTERVAL)
                             try:
-                                await ws.send(json.dumps({"action": "ping"}))
+                                # RTDS troubleshooting guidance: send literal PING every 5s.
+                                await ws.send("PING")
                             except Exception:
-                                try:
-                                    await ws.send("PING")
-                                except Exception:
-                                    break
+                                break
                             # Force reconnect only on extended silence; avoid reconnect churn.
                             idle_s = (_time.time() - float(self._rtds_last_msg_ts or 0.0))
                             if idle_s > max(30.0, RTDS_IDLE_RECONNECT_SEC):
@@ -4589,7 +4591,12 @@ class LiveTrader:
                                             m["up_price"] = 1 - price
 
                             topic = str(ev.get("topic", "") or ev.get("type", "") or "").lower()
-                            if topic not in ("crypto_prices", "crypto_prices_update", "crypto_prices_v2"):
+                            if topic not in (
+                                "crypto_prices",
+                                "crypto_prices_update",
+                                "crypto_prices_v2",
+                                "crypto_prices_chainlink",
+                            ):
                                 continue
                             payload = ev.get("payload", {}) or {}
                             payloads = payload if isinstance(payload, list) else [payload]
@@ -4600,7 +4607,10 @@ class LiveTrader:
                                 val = float(p.get("value") or p.get("price") or p.get("v") or 0)
                                 if val <= 0:
                                     continue
-                                MAP = {"btcusdt":"BTC","ethusdt":"ETH","solusdt":"SOL","xrpusdt":"XRP"}
+                                MAP = {
+                                    "btcusdt": "BTC", "ethusdt": "ETH", "solusdt": "SOL", "xrpusdt": "XRP",
+                                    "btc/usd": "BTC", "eth/usd": "ETH", "sol/usd": "SOL", "xrp/usd": "XRP",
+                                }
                                 asset = MAP.get(sym)
                                 if not asset:
                                     continue
