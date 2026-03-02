@@ -10389,6 +10389,7 @@ class LiveTrader:
             pts = k.split("|")
             if len(pts) < 2: return True
             d_p, t_p = pts[0], pts[1]
+            if ONLY_5M_MODE and d_p != "5m": return False
             if d_p == "5m" and not ENABLE_5M: return False
             if d_p == "15m":
                 if BLOCK_SCORE_S9_11_15M and t_p == "s9-11": return False
@@ -10397,13 +10398,13 @@ class LiveTrader:
             return True
         execq_all = [e for e in execq_all if _buck_active(e["bucket"])]
         active_gates: list = []
-        if BLOCK_SCORE_S9_11_15M: active_gates.append("soft s9-11" if SCORE_BLOCK_SOFT_MODE else "no s9-11")
-        if BLOCK_SCORE_S0_8_15M:  active_gates.append("soft s0-8" if SCORE_BLOCK_SOFT_MODE else "no s0-8")
-        if BLOCK_SCORE_S12P_15M:  active_gates.append("soft s12+" if SCORE_BLOCK_SOFT_MODE else "no s12+")
-        if BLOCK_ASSET_SOL_15M:   active_gates.append("soft SOL" if ASSET_BLOCK_SOFT_MODE else "no SOL")
-        if BLOCK_ASSET_XRP_15M:   active_gates.append("soft XRP" if ASSET_BLOCK_SOFT_MODE else "no XRP")
+        if (not ONLY_5M_MODE) and BLOCK_SCORE_S9_11_15M: active_gates.append("soft s9-11" if SCORE_BLOCK_SOFT_MODE else "no s9-11")
+        if (not ONLY_5M_MODE) and BLOCK_SCORE_S0_8_15M:  active_gates.append("soft s0-8" if SCORE_BLOCK_SOFT_MODE else "no s0-8")
+        if (not ONLY_5M_MODE) and BLOCK_SCORE_S12P_15M:  active_gates.append("soft s12+" if SCORE_BLOCK_SOFT_MODE else "no s12+")
+        if (not ONLY_5M_MODE) and BLOCK_ASSET_SOL_15M:   active_gates.append("soft SOL" if ASSET_BLOCK_SOFT_MODE else "no SOL")
+        if (not ONLY_5M_MODE) and BLOCK_ASSET_XRP_15M:   active_gates.append("soft XRP" if ASSET_BLOCK_SOFT_MODE else "no XRP")
         if not ENABLE_5M:         active_gates.append("5m off")
-        if MIN_ENTRY_PRICE_S0_8_15M > 0:
+        if (not ONLY_5M_MODE) and MIN_ENTRY_PRICE_S0_8_15M > 0:
             active_gates.append(f"s0-8\u2265{MIN_ENTRY_PRICE_S0_8_15M:.2f}")
 
         # Daily totals (UTC day) from metrics log, cached to keep dashboard fast.
@@ -10462,6 +10463,7 @@ class LiveTrader:
             "charts": charts,
             "positions": positions,
             "skip_top": skip_top,
+            "skip_scope_label": ("5m" if ONLY_5M_MODE else "15m"),
             "execq": execq,
             "execq_all": execq_all,
             "active_gates": active_gates,
@@ -10983,11 +10985,12 @@ function renderLeft(d){
     h+=`<div class="card"><div class="ch">Active Gates</div><div class="gates">`+
       d.active_gates.map(g=>`<span class="gtag">${g}</span>`).join('')+`</div></div>`;
   }
+  const scope=(d.skip_scope_label||'15m');
   const sk=d.skip_top||[];
   if(!sk.length){
-    h+=`<div class="card"><div class="ch">Skip Reasons</div><div class="ce">None in 15m</div></div>`;
+    h+=`<div class="card"><div class="ch">Skip Reasons</div><div class="ce">None in ${scope}</div></div>`;
   }else{
-    h+=`<div class="card"><div class="ch">Skip Reasons · 15m</div>`+
+    h+=`<div class="card"><div class="ch">Skip Reasons · ${scope}</div>`+
       sk.map(s=>`<div class="skrow"><span class="skr">${s.reason}</span><span class="skc">${s.count}</span></div>`).join('')+`</div>`;
   }
   document.getElementById('lpanel').innerHTML=h;
