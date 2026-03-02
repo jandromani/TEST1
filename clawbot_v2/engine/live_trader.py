@@ -4208,16 +4208,21 @@ class LiveTrader:
                     # status() is sync: avoid blocking I/O here.
                     # open price will be refreshed by scan/market loops.
                     _ = (start_ts_m, end_ts_m, dur_m)
-            # Use most-recent price: CL or RTDS, whichever has the fresher timestamp
+            # Use a consistent live mark source:
+            # - prefer CL near expiry (closer to resolver behavior)
+            # - otherwise use freshest feed
             cl_p   = self.cl_prices.get(asset, 0)
             cl_ts  = self.cl_updated.get(asset, 0)
             rtds_p = self.prices.get(asset, 0)
             rtds_ts = self._price_hist_last_ts(asset)
-            src_hint = str(self._price_src.get(asset, "") or "")
-            if src_hint and rtds_p > 0:
-                cur_p = rtds_p
-                cur_p_src = src_hint
-            elif rtds_ts > cl_ts and rtds_p > 0:
+            end_ts     = t.get("end_ts", 0)
+            mins_left  = max(0, (end_ts - now_ts) / 60)
+            rtds_fresh = (rtds_p > 0) and (rtds_ts > 0) and ((now_ts - float(rtds_ts)) <= 4.0)
+            cl_fresh = (cl_p > 0) and (cl_ts > 0) and ((now_ts - float(cl_ts)) <= 8.0)
+            if cl_fresh and (mins_left <= 1.0 or not rtds_fresh):
+                cur_p = cl_p
+                cur_p_src = "CL"
+            elif rtds_fresh:
                 cur_p = rtds_p
                 cur_p_src = "RTDS"
             elif cl_p > 0:
@@ -4226,8 +4231,6 @@ class LiveTrader:
             else:
                 cur_p = rtds_p
                 cur_p_src = "RTDS"
-            end_ts     = t.get("end_ts", 0)
-            mins_left  = max(0, (end_ts - now_ts) / 60)
             title      = m.get("question", "")[:38]
             if open_p > 0 and src == "?":
                 src = "CL" if cl_p > 0 else "RTDS"
@@ -4323,11 +4326,12 @@ class LiveTrader:
             cl_ts  = self.cl_updated.get(asset, 0)
             rtds_p = float(self.prices.get(asset, 0.0) or 0.0)
             rtds_ts2 = self._price_hist_last_ts(asset)
-            src_hint = str(self._price_src.get(asset, "") or "")
-            if src_hint and rtds_p > 0:
-                cur_p = rtds_p
-                cur_p_src = src_hint
-            elif rtds_ts2 > cl_ts and rtds_p > 0:
+            rtds_fresh = (rtds_p > 0) and (rtds_ts2 > 0) and ((now_ts - float(rtds_ts2)) <= 4.0)
+            cl_fresh = (cl_p > 0) and (cl_ts > 0) and ((now_ts - float(cl_ts)) <= 8.0)
+            if cl_fresh and (mins_left <= 1.0 or not rtds_fresh):
+                cur_p = cl_p
+                cur_p_src = "CL"
+            elif rtds_fresh:
                 cur_p = rtds_p
                 cur_p_src = "RTDS"
             elif cl_p > 0:
@@ -8447,7 +8451,8 @@ class LiveTrader:
             st = st_floor.strftime("%Y-%m-%dT%H:%M:%SZ")
             et = datetime.fromtimestamp(et_floor, tz=_tz.utc).strftime("%Y-%m-%dT%H:%M:%SZ")
 
-            variants = ["five", "fifteen"] if dur == 5 else ["fifteen"]
+            # Prefer canonical PM variants used by web app, keep legacy as fallback.
+            variants = ["fiveminute", "five"] if dur == 5 else ["fifteenminute", "fifteen"]
             for variant in variants:
                 data = await self._http_get_json(
                     "https://polymarket.com/api/crypto/crypto-price",
