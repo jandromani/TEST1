@@ -1336,14 +1336,11 @@ async def _score_market(self, m: dict) -> dict | None:
                         f"(n={n5} wr={wr5*100:.1f}% pf={pf5:.2f})"
                     )
     if score < min_score_local:
-        if duration >= 15 and FORCE_TRADE_EVERY_ROUND and (not booster_eval):
-            if self._noisy_log_enabled(f"score-relax-force:{asset}:{duration}", LOG_SKIP_EVERY_SEC):
-                print(
-                    f"{Y}[SCORE-RELAX]{RS} {asset} {duration}m score={score} "
-                    f"< min={min_score_local} — force-round bypass"
-                )
-        else:
-            return None
+        if self._noisy_log_enabled(f"score-info:{asset}:{duration}", LOG_SKIP_EVERY_SEC):
+            print(
+                f"{Y}[SCORE-INFO]{RS} {asset} {duration}m score={score} "
+                f"< target={min_score_local} (non-blocking)"
+            )
     # Per-asset blocking for 15m
     if duration >= 15:
         asset = m.get("asset", "")
@@ -1673,21 +1670,12 @@ async def _score_market(self, m: dict) -> dict | None:
     exec_slip_cost, exec_nofill_penalty, exec_fill_ratio = self._execution_penalties(duration, score, entry)
     execution_ev = ev_net - exec_slip_cost - exec_nofill_penalty
     if execution_ev < min_ev_req:
-        if duration >= 15 and (not booster_eval):
-            if self._noisy_log_enabled(f"ev-relax-force:{asset}:{side}", LOG_SKIP_EVERY_SEC):
-                print(
-                    f"{Y}[EV-RELAX]{RS} {asset} {side} exec_ev={execution_ev:.3f} "
-                    f"(min={min_ev_req:.3f}) 15m gate bypass"
-                )
-        else:
-            if self._noisy_log_enabled(f"skip-score-ev:{asset}:{side}", LOG_SKIP_EVERY_SEC):
-                print(
-                    f"{Y}[SKIP] {asset} {side} exec_ev={execution_ev:.3f} "
-                    f"(ev={ev_net:.3f} slip={exec_slip_cost:.3f} nofill={exec_nofill_penalty:.3f}) "
-                    f"< min={min_ev_req:.3f}{RS}"
-                )
-            self._skip_tick("ev_below")
-            return None
+        if self._noisy_log_enabled(f"ev-info:{asset}:{side}", LOG_SKIP_EVERY_SEC):
+            print(
+                f"{Y}[EV-INFO]{RS} {asset} {side} exec_ev={execution_ev:.3f} "
+                f"(ev={ev_net:.3f} slip={exec_slip_cost:.3f} nofill={exec_nofill_penalty:.3f}) "
+                f"< target={min_ev_req:.3f} (non-blocking)"
+            )
 
     # Block only deeply negative mature buckets to improve WR/PnL regime quality.
     if duration >= 15 and (not booster_eval) and BUCKET_HARD_BLOCK_ENABLED:

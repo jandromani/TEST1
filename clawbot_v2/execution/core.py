@@ -975,9 +975,11 @@ async def _place_order(self, token_id, side, price, size_usdc, asset, duration, 
                     return None
                 fresh_ev_net = (true_prob / max(fresh_ask, 1e-9)) - 1.0 - max(0.001, fresh_ask * (1.0 - fresh_ask) * 0.0624)
                 if fresh_ev_net < min_ev_fb:
-                    print(f"{Y}[SKIP] {asset} {side} fallback ev_net={fresh_ev_net:.3f} < min={min_ev_fb:.3f}{RS}")
-                    self._skip_tick("fallback_ev_below")
-                    return None
+                    if self._noisy_log_enabled(f"fallback-ev-info:{asset}:{side}", LOG_SKIP_EVERY_SEC):
+                        print(
+                            f"{Y}[EV-INFO]{RS} {asset} {side} fallback ev_net={fresh_ev_net:.3f} "
+                            f"< target={min_ev_fb:.3f} (non-blocking)"
+                        )
                 taker_price = round(min(fresh_ask, eff_max_entry, 0.97), 4)
                 slip_now = _slip_bps(taker_price, fresh_ask)
                 if slip_now > slip_cap_bps:
