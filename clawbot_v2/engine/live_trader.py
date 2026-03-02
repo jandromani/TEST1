@@ -702,7 +702,8 @@ FIVE_M_DYNAMIC_SCORE_ADD_BAD = int(os.environ.get("FIVE_M_DYNAMIC_SCORE_ADD_BAD"
 FIVE_M_DYNAMIC_SCORE_ADD_WORSE = int(os.environ.get("FIVE_M_DYNAMIC_SCORE_ADD_WORSE", "3"))
 ORDER_FAST_MODE = os.environ.get("ORDER_FAST_MODE", "true").lower() == "true"
 ALWAYS_LIMIT_FOK_EXEC = os.environ.get("ALWAYS_LIMIT_FOK_EXEC", "true").lower() == "true"
-NO_GATES_MODE = os.environ.get("NO_GATES_MODE", "true").lower() == "true"
+NO_GATES_MODE = os.environ.get("NO_GATES_MODE", "false").lower() == "true"
+FORCED_COVERAGE_ENABLED = os.environ.get("FORCED_COVERAGE_ENABLED", "false").lower() == "true"
 TRUE_PROB_ONLY_MODE = os.environ.get("TRUE_PROB_ONLY_MODE", "false").lower() == "true"
 EV_EXEC_ONLY_MODE = os.environ.get("EV_EXEC_ONLY_MODE", "true").lower() == "true"
 MAKER_POLL_5M_SEC = float(os.environ.get("MAKER_POLL_5M_SEC", "0.15"))
@@ -5569,6 +5570,9 @@ class LiveTrader:
         Kept as stub to avoid AttributeError if called from stale code.
         """
         try:
+            # Keep synthetic path fully opt-in.
+            if not (NO_GATES_MODE and FORCED_COVERAGE_ENABLED):
+                return None
             cid = str(m.get("conditionId", "") or "")
             if not cid:
                 return None
@@ -5610,6 +5614,10 @@ class LiveTrader:
             else:
                 side = "Up" if current >= open_price else "Down"
                 entry = up_price if side == "Up" else dn_price
+            # Even in synthetic mode, respect the active regime cap when enabled.
+            if REGIME_BUCKET_ONLY_ENABLED and int(duration) == int(REGIME_BUCKET_ONLY_DURATION):
+                if not (0.0 < float(entry) < float(REGIME_BUCKET_ONLY_ENTRY_MAX)):
+                    return None
             max_entry_allowed = min(0.95, MAX_ENTRY_PRICE + MAX_ENTRY_TOL)
             if NO_GATES_MODE and HIGHPAYOUT_ONLY_NO_GATES:
                 max_entry_allowed = min(max_entry_allowed, entry_max)
@@ -8767,7 +8775,7 @@ class LiveTrader:
                 if candidates:
                     self._perf_update("score_ms", elapsed_ms / max(1, len(candidates)))
                 valid   = sorted([s for s in signals if s is not None], key=lambda x: -x["score"])
-                if NO_GATES_MODE and (not valid) and candidates:
+                if NO_GATES_MODE and FORCED_COVERAGE_ENABLED and (not valid) and candidates:
                     forced = [self._build_forced_round_signal(m) for m in candidates]
                     valid = sorted([s for s in forced if s is not None], key=lambda x: -x["score"])
                     if valid and self._noisy_log_enabled("forced-coverage", 5.0):
