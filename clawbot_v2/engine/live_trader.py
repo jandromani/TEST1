@@ -661,7 +661,8 @@ FIVE_M_DYNAMIC_SCORE_ADD_WORSE = int(os.environ.get("FIVE_M_DYNAMIC_SCORE_ADD_WO
 ORDER_FAST_MODE = os.environ.get("ORDER_FAST_MODE", "true").lower() == "true"
 ALWAYS_LIMIT_FOK_EXEC = os.environ.get("ALWAYS_LIMIT_FOK_EXEC", "true").lower() == "true"
 NO_GATES_MODE = os.environ.get("NO_GATES_MODE", "true").lower() == "true"
-TRUE_PROB_ONLY_MODE = os.environ.get("TRUE_PROB_ONLY_MODE", "true").lower() == "true"
+TRUE_PROB_ONLY_MODE = os.environ.get("TRUE_PROB_ONLY_MODE", "false").lower() == "true"
+EV_EXEC_ONLY_MODE = os.environ.get("EV_EXEC_ONLY_MODE", "true").lower() == "true"
 MAKER_POLL_5M_SEC = float(os.environ.get("MAKER_POLL_5M_SEC", "0.15"))
 MAKER_POLL_15M_SEC = float(os.environ.get("MAKER_POLL_15M_SEC", "0.25"))
 MAKER_WAIT_5M_SEC = float(os.environ.get("MAKER_WAIT_5M_SEC", "0.30"))
@@ -7506,6 +7507,18 @@ class LiveTrader:
 
     def _signal_growth_score(self, sig: dict) -> float:
         """Rank candidates by growth quality (higher is better)."""
+        if EV_EXEC_ONLY_MODE:
+            # Max-PF decision rule: rank by executable EV only.
+            # execution_ev already includes fee/slippage/no-fill penalties.
+            entry = max(float(sig.get("entry", 0.5)), 1e-6)
+            _fee_dyn = max(0.001, entry * (1.0 - entry) * 0.0624)
+            return float(
+                sig.get(
+                    "execution_ev",
+                    (float(sig.get("true_prob", 0.5) or 0.5) / entry) - 1.0 - _fee_dyn,
+                )
+                or 0.0
+            )
         if TRUE_PROB_ONLY_MODE:
             # Pure decision rule: choose by posterior probability only.
             # No additional ranking limits (score/edge/payout heuristics disabled).
