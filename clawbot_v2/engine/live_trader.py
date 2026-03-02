@@ -416,11 +416,15 @@ RTDS_IDLE_RECONNECT_SEC = float(os.environ.get("RTDS_IDLE_RECONNECT_SEC", "120.0
 RTDS_CONNECT_MIN_GAP_SEC = float(os.environ.get("RTDS_CONNECT_MIN_GAP_SEC", "3.0"))
 RTDS_429_BASE_BACKOFF_SEC = float(os.environ.get("RTDS_429_BASE_BACKOFF_SEC", "120.0"))
 RTDS_429_MAX_BACKOFF_SEC = float(os.environ.get("RTDS_429_MAX_BACKOFF_SEC", "3600.0"))
+RTDS_429_QUARANTINE_SEC = float(os.environ.get("RTDS_429_QUARANTINE_SEC", "900.0"))
+RTDS_429_DISABLE_AFTER = int(os.environ.get("RTDS_429_DISABLE_AFTER", "6"))
 RTDS_HARD_STALE_SEC = float(os.environ.get("RTDS_HARD_STALE_SEC", "300.0"))
 RTDS_MARKET_SUB_BATCH_SIZE = int(os.environ.get("RTDS_MARKET_SUB_BATCH_SIZE", "20"))
 RTDS_MARKET_SUB_STEP_SEC = float(os.environ.get("RTDS_MARKET_SUB_STEP_SEC", "0.35"))
 RTDS_ENABLE_MARKET_SUBS = str(os.environ.get("RTDS_ENABLE_MARKET_SUBS", "0")).strip().lower() in ("1", "true", "yes", "on")
 RTDS_ENABLE_CHAINLINK = str(os.environ.get("RTDS_ENABLE_CHAINLINK", "0")).strip().lower() in ("1", "true", "yes", "on")
+RTDS_STRICT_ONLY = str(os.environ.get("RTDS_STRICT_ONLY", "1")).strip().lower() in ("1", "true", "yes", "on")
+RTDS_REQUIRED_FOR_ENTRY = str(os.environ.get("RTDS_REQUIRED_FOR_ENTRY", "1")).strip().lower() in ("1", "true", "yes", "on")
 FEE_RATE_CACHE_TTL_SEC = float(os.environ.get("FEE_RATE_CACHE_TTL_SEC", "900"))
 STATUS_INTERVAL= int(os.environ.get("STATUS_INTERVAL", "15"))
 ONCHAIN_SYNC_SEC = float(os.environ.get("ONCHAIN_SYNC_SEC", "2.0"))
@@ -1361,6 +1365,8 @@ class LiveTrader:
         self._price_src = {}          # asset -> "RTDS" | "CL" | "CL-FB"
         self._rtds_ws        = None   # live WebSocket handle for dynamic subscriptions
         self._rtds_fails = 0
+        self._rtds_429_streak = 0
+        self._rtds_disabled_until = 0.0
         self._rtds_cooldown_until = 0.0
         self._rtds_last_msg_ts = 0.0
         self._rtds_last_connect_try_ts = 0.0
@@ -4515,10 +4521,13 @@ class LiveTrader:
         while True:
             now0 = _time.time()
             wait_until = max(
+                float(self._rtds_disabled_until or 0.0),
                 float(self._rtds_cooldown_until or 0.0),
                 float(self._rtds_last_connect_try_ts or 0.0) + max(0.2, RTDS_CONNECT_MIN_GAP_SEC),
             )
             if wait_until > now0:
+                if self._noisy_log_enabled("rtds-disabled-wait", 30.0) and float(self._rtds_disabled_until or 0.0) > now0:
+                    print(f"{Y}[RTDS]{RS} in 429 quarantine for {wait_until - now0:.1f}s")
                 await asyncio.sleep(wait_until - now0)
             self._rtds_last_connect_try_ts = _time.time()
             pinger_task = None
@@ -4537,35 +4546,16 @@ class LiveTrader:
                     self.rtds_ok = True
                     self._rtds_ws = ws   # expose for dynamic market subscriptions
                     self._rtds_fails = 0
+                    self._rtds_429_streak = 0
+                    self._rtds_disabled_until = 0.0
                     self._rtds_cooldown_until = 0.0
                     self._rtds_last_msg_ts = _time.time()
                     print(f"{G}[RTDS] Live — streaming BTC/ETH/SOL/XRP{RS}")
 
-                    # Keep RTDS lightweight to avoid upstream throttling (429).
-                    # Token-level market subscriptions are optional and disabled by default.
-                    if RTDS_ENABLE_MARKET_SUBS:
-                        tids = []
-                        for _, m in list(self.active_mkts.items()):
-                            for tid in [m.get("token_up", ""), m.get("token_down", "")]:
-                                tid_s = str(tid or "").strip()
-                                if tid_s:
-                                    tids.append(tid_s)
-                        tids = sorted(set(tids))
-                        # Pace subscriptions in small batches on the same socket.
-                        # This avoids burst subscribe patterns that can trigger 429.
-                        bs = max(1, int(RTDS_MARKET_SUB_BATCH_SIZE))
-                        step = max(0.1, float(RTDS_MARKET_SUB_STEP_SEC))
-                        for i in range(0, len(tids), bs):
-                            chunk = tids[i:i + bs]
-                            try:
-                                await ws.send(json.dumps({
-                                    "action": "subscribe",
-                                    "subscriptions": [{"asset_id": tid, "type": "market"} for tid in chunk]
-                                }))
-                            except Exception:
-                                pass
-                            if i + bs < len(tids):
-                                await asyncio.sleep(step)
+                    # RTDS supports only documented topic/type subscriptions.
+                    # Market/orderbook token subscriptions are handled by CLOB market WS, not RTDS.
+                    if RTDS_ENABLE_MARKET_SUBS and self._noisy_log_enabled("rtds-market-subs-ignored", 300.0):
+                        print(f"{Y}[RTDS]{RS} market token subs ignored on RTDS (use CLOB market WS)")
 
                     async def pinger():
                         while True:
@@ -6187,7 +6177,7 @@ class LiveTrader:
                         # ── Price feed failover: drive self.prices from Binance when RTDS is down/stale ──
                         price = float(data.get("p", 0) or 0)
                         rtds_age = ts - float(self._rtds_asset_ts.get(asset, 0.0) or 0.0)
-                        use_bnb_fallback = (not self.rtds_ok) or (rtds_age > 3.0)
+                        use_bnb_fallback = (not RTDS_STRICT_ONLY) and ((not self.rtds_ok) or (rtds_age > 3.0))
                         if price > 0 and use_bnb_fallback:
                             self.prices[asset] = price
                             self._price_src[asset] = ("BNB-FB" if not self.rtds_ok else "BNB")
