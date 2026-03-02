@@ -10433,6 +10433,51 @@ class LiveTrader:
         d_wins = int(dc.get("wins", 0) or 0)
         d_wr = round(d_wins / d_out * 100, 1) if d_out > 0 else 0.0
 
+        # 5m regime report by cents band: <30c, 30-50c, >50c
+        report_5m_bands = []
+        try:
+            agg = {
+                "<30c": {"fills": 0, "outcomes": 0, "wins": 0, "gross_win": 0.0, "gross_loss": 0.0, "pnl": 0.0},
+                "30-50c": {"fills": 0, "outcomes": 0, "wins": 0, "gross_win": 0.0, "gross_loss": 0.0, "pnl": 0.0},
+                ">50c": {"fills": 0, "outcomes": 0, "wins": 0, "gross_win": 0.0, "gross_loss": 0.0, "pnl": 0.0},
+            }
+            for k, v in self._bucket_stats.rows.items():
+                parts = str(k or "").split("|")
+                if len(parts) < 3 or parts[0] != "5m":
+                    continue
+                band = parts[2]
+                if band not in agg:
+                    continue
+                a = agg[band]
+                a["fills"] += int(v.get("fills", 0) or 0)
+                outcomes = int(v.get("outcomes", v.get("wins", 0) + v.get("losses", 0)) or 0)
+                a["outcomes"] += outcomes
+                a["wins"] += int(v.get("wins", 0) or 0)
+                a["gross_win"] += float(v.get("gross_win", 0.0) or 0.0)
+                a["gross_loss"] += float(v.get("gross_loss", 0.0) or 0.0)
+                a["pnl"] += float(v.get("pnl", 0.0) or 0.0)
+            for band in ("<30c", "30-50c", ">50c"):
+                a = agg[band]
+                outcomes = int(a["outcomes"])
+                wins = int(a["wins"])
+                losses = max(0, outcomes - wins)
+                wr = round((wins / outcomes) * 100.0, 1) if outcomes > 0 else None
+                gw = float(a["gross_win"] or 0.0)
+                gl = float(a["gross_loss"] or 0.0)
+                pf = (gw / gl) if gl > 1e-9 else (99.0 if gw > 0 else None)
+                report_5m_bands.append({
+                    "band": band,
+                    "fills": int(a["fills"]),
+                    "outcomes": outcomes,
+                    "wins": wins,
+                    "losses": losses,
+                    "wr": wr,
+                    "pf": (round(pf, 2) if pf is not None else None),
+                    "pnl": round(float(a["pnl"] or 0.0), 2),
+                })
+        except Exception:
+            report_5m_bands = []
+
         # Health
         cl_ages = {a: round(now_ts - float(self.cl_updated.get(a, 0) or 0), 1)
                    for a in ("BTC", "ETH", "SOL", "XRP")}
@@ -10466,6 +10511,7 @@ class LiveTrader:
             "skip_scope_label": ("5m" if ONLY_5M_MODE else "15m"),
             "execq": execq,
             "execq_all": execq_all,
+            "report_5m_bands": report_5m_bands,
             "active_gates": active_gates,
             "daily_day": day_utc,
             "daily_pnl_total": round(float(dc.get("pnl", 0.0) or 0.0), 2),
@@ -10984,6 +11030,16 @@ function renderLeft(d){
   if(d.active_gates&&d.active_gates.length){
     h+=`<div class="card"><div class="ch">Active Gates</div><div class="gates">`+
       d.active_gates.map(g=>`<span class="gtag">${g}</span>`).join('')+`</div></div>`;
+  }
+  const rep5=d.report_5m_bands||[];
+  if(rep5.length){
+    h+=`<div class="card"><div class="ch">5m Regime Report</div>`+
+      rep5.map(r=>{
+        const w=(r.wr==null?'—':(r.wr+'%'));
+        const p=(r.pf==null?'—':r.pf.toFixed(2));
+        const c=(r.pnl>=0?'g':'r');
+        return `<div class="skrow"><span class="skr">${r.band} | ${r.wins}W ${r.losses}L (${r.outcomes}) | WR ${w} | PF ${p}</span><span class="skc ${c}">${pnl(r.pnl)}</span></div>`;
+      }).join('')+`</div>`;
   }
   const scope=(d.skip_scope_label||'15m');
   const sk=d.skip_top||[];
