@@ -180,7 +180,7 @@ async def _score_market(self, m: dict) -> dict | None:
     if move_pct >= DIR_MOVE_MIN:
         direction = "Up" if current > open_price else "Down"
         # Small move + opposite CL direction: keep trading, but align to oracle and penalize.
-        if cl_direction and cl_direction != direction and move_pct < DIR_CONFLICT_MOVE_MAX:
+        if (not LOWCENT_REPRO_MODE) and cl_direction and cl_direction != direction and move_pct < DIR_CONFLICT_MOVE_MAX:
             score -= DIR_CONFLICT_SCORE_PEN
             edge -= DIR_CONFLICT_EDGE_PEN
             px_align_conflict = True
