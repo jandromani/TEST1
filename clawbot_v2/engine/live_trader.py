@@ -8966,6 +8966,7 @@ class LiveTrader:
                         continue
                     if (
                         (not LOWCENT_REPRO_MODE)
+                        and
                         (not NO_GATES_MODE)
                         and
                         consensus_side_15m
