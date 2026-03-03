@@ -7720,6 +7720,10 @@ class LiveTrader:
                 soft *= 1.0 + min(0.25, exp / 2.0)
             else:
                 soft *= max(0.50, 1.0 + exp / 2.0)
+            # Confidence shrinkage: avoid overreacting on small sample buckets.
+            # n<=8 => almost neutral; n>=48 => full confidence.
+            conf = max(0.0, min(1.0, (float(outcomes) - 8.0) / 40.0))
+            soft = (1.0 - conf) * 1.0 + conf * soft
             soft = max(float(BUCKET_PF_TARGET_MIN_SCALE), min(float(BUCKET_PF_TARGET_MAX_SCALE), soft))
             scale *= soft
         return max(0.10, min(1.20, scale))
