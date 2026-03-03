@@ -679,6 +679,14 @@ REGIME_BUCKET_ONLY_DURATION = int(os.environ.get("REGIME_BUCKET_ONLY_DURATION", 
 REGIME_BUCKET_ONLY_SCORE_MIN = int(os.environ.get("REGIME_BUCKET_ONLY_SCORE_MIN", "9"))
 REGIME_BUCKET_ONLY_SCORE_MAX = int(os.environ.get("REGIME_BUCKET_ONLY_SCORE_MAX", "11"))
 REGIME_BUCKET_ONLY_ENTRY_MAX = float(os.environ.get("REGIME_BUCKET_ONLY_ENTRY_MAX", "0.30"))
+REGIME_BUCKET_ONLY_ENTRY_MIN = float(os.environ.get("REGIME_BUCKET_ONLY_ENTRY_MIN", "0.08"))
+REGIME_BUCKET_ONLY_USE_SCORE_BAND = os.environ.get("REGIME_BUCKET_ONLY_USE_SCORE_BAND", "true").lower() == "true"
+# Dynamic 5m low-cent regime from Polymarket historical behavior:
+# - early/mid round can include 30-37.5c
+# - near expiry tighten back to <30c
+REGIME_BUCKET_ONLY_EARLY_ENTRY_MAX = float(os.environ.get("REGIME_BUCKET_ONLY_EARLY_ENTRY_MAX", "0.375"))
+REGIME_BUCKET_ONLY_LATE_ENTRY_MAX = float(os.environ.get("REGIME_BUCKET_ONLY_LATE_ENTRY_MAX", "0.30"))
+REGIME_BUCKET_ONLY_LATE_MINS_LEFT = float(os.environ.get("REGIME_BUCKET_ONLY_LATE_MINS_LEFT", "1.0"))
 LOWCENT_TEST_ALL_SCORES_5M = os.environ.get("LOWCENT_TEST_ALL_SCORES_5M", "true").lower() == "true"
 LOWCENT_TEST_MIN_SIZE_ENABLED = os.environ.get("LOWCENT_TEST_MIN_SIZE_ENABLED", "true").lower() == "true"
 LOWCENT_TEST_MIN_SIZE_USDC = float(os.environ.get("LOWCENT_TEST_MIN_SIZE_USDC", "0.99"))

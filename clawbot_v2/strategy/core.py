@@ -1334,22 +1334,34 @@ async def _score_market(self, m: dict) -> dict | None:
         return None
     if REGIME_BUCKET_ONLY_ENABLED:
         _dur_ok = (duration == REGIME_BUCKET_ONLY_DURATION)
-        # In low-cent 5m mode we intentionally ignore score bands:
-        # regime is defined only by duration + entry cents.
-        _score_ok = True
-        _entry_ok = (0.0 < float(regime_entry) < REGIME_BUCKET_ONLY_ENTRY_MAX)
+        # Optional score-band filter for best live bucket quality.
+        if REGIME_BUCKET_ONLY_USE_SCORE_BAND:
+            _score_ok = (REGIME_BUCKET_ONLY_SCORE_MIN <= int(score) <= REGIME_BUCKET_ONLY_SCORE_MAX)
+        else:
+            _score_ok = True
+        # Dynamic entry cap:
+        # near expiry keep strict <30c, earlier allow up to configured early cap.
+        _entry_cap = float(REGIME_BUCKET_ONLY_EARLY_ENTRY_MAX)
+        if float(mins_left) <= float(REGIME_BUCKET_ONLY_LATE_MINS_LEFT):
+            _entry_cap = min(float(_entry_cap), float(REGIME_BUCKET_ONLY_LATE_ENTRY_MAX))
+        _entry_ok = (
+            float(REGIME_BUCKET_ONLY_ENTRY_MIN) <= float(regime_entry) < float(_entry_cap)
+        )
         if not (_dur_ok and _score_ok and _entry_ok):
             if self._noisy_log_enabled(f"mode-regime-skip:{asset}:{cid}", max(8.0, float(LOG_SKIP_EVERY_SEC))):
                 _why = []
                 if not _dur_ok:
                     _why.append("duration")
+                if not _score_ok:
+                    _why.append("score")
                 if not _entry_ok:
                     _why.append("entry")
                 print(
                     f"{Y}[MODE-SKIP]{RS} {asset} {duration}m "
                     f"score={int(score)} entry={float(regime_entry):.3f} "
                     f"outside regime d={REGIME_BUCKET_ONLY_DURATION} "
-                    f"s=ALL e<{REGIME_BUCKET_ONLY_ENTRY_MAX:.2f} "
+                    f"s={'%d-%d'%(REGIME_BUCKET_ONLY_SCORE_MIN,REGIME_BUCKET_ONLY_SCORE_MAX) if REGIME_BUCKET_ONLY_USE_SCORE_BAND else 'ALL'} "
+                    f"e=[{REGIME_BUCKET_ONLY_ENTRY_MIN:.2f},{_entry_cap:.3f}) "
                     f"why={'+'.join(_why) or 'unknown'}"
                 )
             self._skip_tick("regime_bucket_filter")
