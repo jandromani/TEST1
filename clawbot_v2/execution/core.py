@@ -526,15 +526,25 @@ async def _place_order(self, token_id, side, price, size_usdc, asset, duration, 
                 px = max(exec_price, 1e-9)
                 raw_shares = max(0.0, intended_usdc) / px
                 # Execution hard-min is in USDC, not only in shares.
-                min_notional = max(hard_min_notional, min_shares * px)
+                # Keep a tiny buffer above $1 to avoid 0.999x rejects on marketable BUYs.
+                min_notional = max(hard_min_notional + 0.01, min_shares * px)
                 shares_floor = min_notional / px
-                shares = round(max(raw_shares, shares_floor), 2)
-                notional = round(shares * px, 2)
-                return shares, notional
+                shares = max(raw_shares, shares_floor)
+                # Ceil to 2 decimals (never round down into sub-$1 notional).
+                shares = (int(shares * 100.0 + 0.999999)) / 100.0
+                notional_raw = shares * px
+                min_safe_notional = hard_min_notional + 0.0001
+                while notional_raw < min_safe_notional:
+                    shares = round(shares + 0.01, 2)
+                    notional_raw = shares * px
+                return shares, round(notional_raw, 2)
 
             def _normalize_buy_amount(intended_usdc: float) -> float:
                 # Market BUY maker amount is USDC and must stay at 2 decimals.
-                return float(round(max(0.0, intended_usdc), 2))
+                amt = float(round(max(0.0, intended_usdc), 2))
+                if amt < hard_min_notional:
+                    amt = float(round(hard_min_notional + 0.01, 2))
+                return amt
 
             def _book_depth_usdc(levels, price_cap: float) -> float:
                 depth = 0.0
