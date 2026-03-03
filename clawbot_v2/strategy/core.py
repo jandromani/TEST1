@@ -1345,9 +1345,9 @@ async def _score_market(self, m: dict) -> dict | None:
     # IMPORTANT: use real side-token entry (CLOB best_ask) when available,
     # not only synthetic entry derived from up_price.
     regime_entry = float(entry)
+    regime_book = None
     regime_token_id = str(m.get("token_up", "") if side == "Up" else m.get("token_down", "")).strip()
     if regime_token_id:
-        regime_book = None
         # Reuse prefetched book when it matches selected side token.
         if regime_token_id == prefetch_token and isinstance(_pm_book, dict):
             regime_book = _pm_book
@@ -1791,6 +1791,16 @@ async def _score_market(self, m: dict) -> dict | None:
     if not (ws_fresh or rest_fresh):   # only tighten when both WS and REST are stale
         min_entry_dyn = max(min_entry_dyn, base_min_entry_allowed + ENTRY_TIGHTEN_ADD)
     min_entry_allowed = max(0.01, min(min_entry_dyn, max_entry_allowed - 0.01))
+    if LOWCENT_REPRO_MODE and duration == 5:
+        # Deterministic low-cent execution path:
+        # enforce real side-token ask as entry source and always place LIMITs.
+        min_entry_allowed = float(LOWCENT_REPRO_ENTRY_MIN)
+        max_entry_allowed = max(
+            min_entry_allowed + 1e-6,
+            float(LOWCENT_REPRO_ENTRY_MAX) - 1e-6,
+        )
+        live_entry = float(regime_entry)
+        use_limit = True
     # High-conviction 15m mode: target lower cents early for better payout.
     hc15 = (
         HC15_ENABLED and duration == 15 and
