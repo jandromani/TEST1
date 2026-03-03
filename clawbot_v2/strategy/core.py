@@ -86,7 +86,8 @@ async def _score_market(self, m: dict) -> dict | None:
 
     # Strict RTDS trading mode: do not open new entries unless RTDS feed is
     # currently healthy and the selected decision price is RTDS-derived.
-    if bool(RTDS_REQUIRED_FOR_ENTRY):
+    # Repro low-cent mode is exempt: it can trade with non-RTDS sources too.
+    if bool(RTDS_REQUIRED_FOR_ENTRY) and (not bool(LOWCENT_REPRO_MODE)):
         rtds_ok_now = bool(getattr(self, "rtds_ok", False))
         px_s = str(px_src or "")
         if rtds_ok_now:
