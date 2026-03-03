@@ -8874,6 +8874,9 @@ class LiveTrader:
                 slots = max(0, MAX_OPEN - len(active_pending))
                 if NO_GATES_MODE:
                     slots = max(slots, min(8, len(candidates)))
+                if LOWCENT_REPRO_MODE:
+                    # Repro mode: allow BTC+ETH 5m in the same round.
+                    slots = max(slots, 2)
                 to_exec = []
                 selected = sorted(valid, key=self._signal_growth_score, reverse=True)
                 if FORCE_TRADE_EVERY_ROUND and selected:
@@ -8889,7 +8892,7 @@ class LiveTrader:
                             if self._allow_second_round_trade(cand, first):
                                 filtered.append(cand)
                         selected = filtered
-                if ROUND_BEST_ONLY and valid:
+                if (not LOWCENT_REPRO_MODE) and ROUND_BEST_ONLY and valid:
                     best_5m = max((s for s in valid if s.get("duration", 0) <= 5), key=self._signal_growth_score, default=None)
                     if ONLY_5M_MODE:
                         selected = [s for s in (best_5m,) if s is not None]
@@ -8954,9 +8957,15 @@ class LiveTrader:
                 for sig in selected:
                     if len(to_exec) >= slots:
                         break
+                    if LOWCENT_REPRO_MODE:
+                        if int(sig.get("duration", 0) or 0) != 5:
+                            continue
+                        if str(sig.get("asset", "") or "").upper() not in ("BTC", "ETH"):
+                            continue
                     if blackout_ev and (not NO_GATES_MODE):
                         continue
                     if (
+                        (not LOWCENT_REPRO_MODE)
                         (not NO_GATES_MODE)
                         and
                         consensus_side_15m
@@ -8974,9 +8983,9 @@ class LiveTrader:
                             if not over:
                                 self._skip_tick("consensus_contra")
                                 continue
-                    if (not NO_GATES_MODE) and (not self._exposure_ok(sig, shadow_pending)):
+                    if (not LOWCENT_REPRO_MODE) and (not NO_GATES_MODE) and (not self._exposure_ok(sig, shadow_pending)):
                         continue
-                    if (not NO_GATES_MODE) and (not TRADE_ALL_MARKETS):
+                    if (not LOWCENT_REPRO_MODE) and (not NO_GATES_MODE) and (not TRADE_ALL_MARKETS):
                         pending_up = sum(1 for _, t in shadow_pending.values() if t.get("side") == "Up")
                         pending_dn = sum(1 for _, t in shadow_pending.values() if t.get("side") == "Down")
                         if sig["side"] == "Up" and pending_up >= MAX_SAME_DIR:

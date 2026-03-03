@@ -108,8 +108,9 @@ async def _execute_trade(self, sig: dict):
     try:
         duration = int(sig.get("duration", 0) or 0)
         mins_left = float(sig.get("mins_left", 0.0) or 0.0)
+        repro_lowcent_exec = bool(LOWCENT_REPRO_MODE and duration <= 5)
         min_left_gate = MIN_MINS_LEFT_5M if duration <= 5 else MIN_MINS_LEFT_15M
-        if mins_left <= min_left_gate:
+        if (not repro_lowcent_exec) and mins_left <= min_left_gate:
             if LOG_VERBOSE:
                 print(
                     f"{Y}[SKIP]{RS} {sig['asset']} {duration}m {sig['side']} "
@@ -117,7 +118,8 @@ async def _execute_trade(self, sig: dict):
                 )
             return
         if (
-            (not NO_GATES_MODE)
+            (not repro_lowcent_exec)
+            and (not NO_GATES_MODE)
             and
             LATE_DIR_LOCK_ENABLED
             and duration in (5, 15)
@@ -144,7 +146,7 @@ async def _execute_trade(self, sig: dict):
             extra_score_gate = max(extra_score_gate, EXTRA_SCORE_GATE_BTC_5M)
         if sig.get("asset") == "XRP" and duration > 5:
             extra_score_gate = max(extra_score_gate, EXTRA_SCORE_GATE_XRP_15M)
-        if (not NO_GATES_MODE) and extra_score_gate > 0:
+        if (not repro_lowcent_exec) and (not NO_GATES_MODE) and extra_score_gate > 0:
             base_gate = MIN_SCORE_GATE_5M if duration <= 5 else MIN_SCORE_GATE_15M
             req_score = base_gate + extra_score_gate
             if float(sig.get("score", 0.0) or 0.0) < req_score:
@@ -154,19 +156,19 @@ async def _execute_trade(self, sig: dict):
                         f"score={sig.get('score', 0):.0f} < req={req_score:.0f}"
                     )
                 return
-        if (not NO_GATES_MODE) and sig.get("quote_age_ms", 0) > MAX_QUOTE_STALENESS_MS:
+        if (not repro_lowcent_exec) and (not NO_GATES_MODE) and sig.get("quote_age_ms", 0) > MAX_QUOTE_STALENESS_MS:
             # Soft gate: keep trading unless quote is extremely stale.
             if sig.get("quote_age_ms", 0) > MAX_QUOTE_STALENESS_MS * 3:
                 if LOG_VERBOSE:
                     print(f"{Y}[SKIP] very stale quote {sig['asset']} age={sig.get('quote_age_ms', 0):.0f}ms{RS}")
                 return
-        if (not NO_GATES_MODE) and sig.get("signal_latency_ms", 0) > MAX_SIGNAL_LATENCY_MS:
+        if (not repro_lowcent_exec) and (not NO_GATES_MODE) and sig.get("signal_latency_ms", 0) > MAX_SIGNAL_LATENCY_MS:
             # Soft gate: keep coverage unless decision latency is extreme.
             if sig.get("signal_latency_ms", 0) > MAX_SIGNAL_LATENCY_MS * 2:
                 if LOG_VERBOSE:
                     print(f"{Y}[SKIP] extreme latency {sig['asset']} signal={sig.get('signal_latency_ms', 0):.0f}ms{RS}")
                 return
-        if not NO_GATES_MODE:
+        if (not repro_lowcent_exec) and (not NO_GATES_MODE):
             sig = await self._maybe_wait_for_better_entry(sig)
             if sig is None:
                 return

@@ -1269,6 +1269,11 @@ async def _score_market(self, m: dict) -> dict | None:
             return None
         bk_up = self._get_clob_ws_book(tok_up, max_age_ms=MAX_ORDERBOOK_AGE_MS)
         bk_dn = self._get_clob_ws_book(tok_dn, max_age_ms=MAX_ORDERBOOK_AGE_MS)
+        # Deterministic fallback: if WS side book is stale/missing, pull fresh CLOB REST book.
+        if not isinstance(bk_up, dict):
+            bk_up = await self._fetch_pm_book_safe(tok_up)
+        if not isinstance(bk_dn, dict):
+            bk_dn = await self._fetch_pm_book_safe(tok_dn)
         ask_up = float((bk_up or {}).get("best_ask", 0.0) or 0.0) if isinstance(bk_up, dict) else 0.0
         ask_dn = float((bk_dn or {}).get("best_ask", 0.0) or 0.0) if isinstance(bk_dn, dict) else 0.0
         # Keep mode deterministic: if live side books are not available, do not fall back to synthetic prices.
