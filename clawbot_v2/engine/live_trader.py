@@ -491,6 +491,12 @@ BUCKET_HARD_BLOCK_5M_MIN_OUTCOMES = int(os.environ.get("BUCKET_HARD_BLOCK_5M_MIN
 BUCKET_HARD_BLOCK_5M_MAX_PF = float(os.environ.get("BUCKET_HARD_BLOCK_5M_MAX_PF", "0.95"))
 BUCKET_HARD_BLOCK_5M_MAX_WR = float(os.environ.get("BUCKET_HARD_BLOCK_5M_MAX_WR", "0.45"))
 BUCKET_HARD_BLOCK_5M_MAX_PNL = float(os.environ.get("BUCKET_HARD_BLOCK_5M_MAX_PNL", "-0.01"))
+# Soft PF-target sizing (no hard blocking): continuously scales bet size by bucket quality.
+BUCKET_PF_TARGET_ENABLED = os.environ.get("BUCKET_PF_TARGET_ENABLED", "true").lower() == "true"
+BUCKET_PF_TARGET_VALUE = float(os.environ.get("BUCKET_PF_TARGET_VALUE", "3.0"))
+BUCKET_PF_TARGET_ALPHA = float(os.environ.get("BUCKET_PF_TARGET_ALPHA", "1.25"))
+BUCKET_PF_TARGET_MIN_SCALE = float(os.environ.get("BUCKET_PF_TARGET_MIN_SCALE", "0.10"))
+BUCKET_PF_TARGET_MAX_SCALE = float(os.environ.get("BUCKET_PF_TARGET_MAX_SCALE", "1.20"))
 LOSS_STREAK_PAUSE_ENABLED = os.environ.get("LOSS_STREAK_PAUSE_ENABLED", "false").lower() == "true"
 LOSS_STREAK_PAUSE_N = int(os.environ.get("LOSS_STREAK_PAUSE_N", "3"))     # tightened 4→3
 LOSS_STREAK_PAUSE_SEC = float(os.environ.get("LOSS_STREAK_PAUSE_SEC", "1800"))  # 900→1800s
@@ -7702,7 +7708,21 @@ class LiveTrader:
             scale = 1.15
         if avg_slip > 350.0:
             scale *= 0.75
-        return max(0.40, min(1.20, scale))
+        # Soft PF-target overlay: never hard-block, only shrink/expand size continuously.
+        if BUCKET_PF_TARGET_ENABLED and outcomes >= 8:
+            tgt = max(0.50, float(BUCKET_PF_TARGET_VALUE))
+            alpha = max(0.25, float(BUCKET_PF_TARGET_ALPHA))
+            # Base PF ratio component
+            pf_ratio = max(0.05, float(pf)) / tgt
+            soft = pf_ratio ** alpha
+            # Light expectancy overlay: reward positive expectation, penalize negative.
+            if exp > 0:
+                soft *= 1.0 + min(0.25, exp / 2.0)
+            else:
+                soft *= max(0.50, 1.0 + exp / 2.0)
+            soft = max(float(BUCKET_PF_TARGET_MIN_SCALE), min(float(BUCKET_PF_TARGET_MAX_SCALE), soft))
+            scale *= soft
+        return max(0.10, min(1.20, scale))
 
     def _adaptive_thresholds(self, duration: int) -> tuple[float, float, float]:
         """Dynamic payout/EV/entry thresholds from realized quality (PF/expectancy/slippage)."""
