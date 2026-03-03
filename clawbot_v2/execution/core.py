@@ -436,6 +436,7 @@ async def _place_order(self, token_id, side, price, size_usdc, asset, duration, 
     for attempt in range(max(1, ORDER_RETRY_MAX)):
         try:
             loop = asyncio.get_running_loop()
+            repro_strict_limit = bool(LOWCENT_REPRO_MODE and int(duration or 0) <= 5 and bool(use_limit))
             slip_cap_bps = MAX_TAKER_SLIP_BPS_5M if duration <= 5 else MAX_TAKER_SLIP_BPS_15M
 
             def _slip_bps(exec_price: float, ref_price: float) -> float:
@@ -945,6 +946,11 @@ async def _place_order(self, token_id, side, price, size_usdc, asset, duration, 
                 await loop.run_in_executor(None, lambda: self.clob.cancel(order_id))
             except Exception:
                 pass
+            if repro_strict_limit:
+                # Repro mode must stay true LIMIT-only: never auto-convert to taker.
+                print(f"{Y}[LIMIT]{RS} {asset} {side} unfilled @ {maker_price:.3f} — no taker fallback (repro)")
+                print(f"{Y}[EXEC-RESULT]{RS} {asset} {side} no-fill reason=limit_unfilled_repro")
+                return None
 
             # ── PHASE 2: price-capped FOK fallback — re-fetch book for fresh ask ──
             try:
