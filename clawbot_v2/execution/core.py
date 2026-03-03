@@ -115,6 +115,9 @@ async def _execute_trade(self, sig: dict):
         duration = int(sig.get("duration", 0) or 0)
         mins_left = float(sig.get("mins_left", 0.0) or 0.0)
         repro_lowcent_exec = bool(LOWCENT_REPRO_MODE and duration <= 5)
+        if repro_lowcent_exec:
+            # Repro strategy requirement: always use minimum fixed stake.
+            sig["size"] = float(max(1.0, MIN_EXEC_NOTIONAL_USDC))
         if not hasattr(self, "_repro_resting_limits"):
             self._repro_resting_limits = {}
         if repro_lowcent_exec:
