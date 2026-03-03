@@ -22,6 +22,8 @@ async def _execute_trade(self, sig: dict):
     m = sig["m"]
     side = sig.get("side", "")
     is_booster = bool(sig.get("booster_mode", False))
+    duration_hint = int(sig.get("duration", 0) or 0)
+    repro_lowcent_exec = bool(LOWCENT_REPRO_MODE and duration_hint <= 5)
     round_key = self._round_key(cid=cid, m=m, t=sig)
     round_fp = self._round_fingerprint(cid=cid, m=m, t=sig)
     round_side_key = f"{round_fp}|{side}|{'B' if is_booster else 'N'}"
@@ -34,7 +36,7 @@ async def _execute_trade(self, sig: dict):
                 self._round_side_block_until.pop(k, None)
         if cid in self._executing_cids:
             return
-        if (not is_booster) and (not NO_GATES_MODE) and (cid in self.seen or len(self.pending) >= MAX_OPEN):
+        if (not repro_lowcent_exec) and (not is_booster) and (not NO_GATES_MODE) and (cid in self.seen or len(self.pending) >= MAX_OPEN):
             return
         if is_booster:
             if self._booster_locked():
@@ -50,19 +52,23 @@ async def _execute_trade(self, sig: dict):
             return
         # Prevent rapid-fire retries on the same round/side.
         last_try = float(self._round_side_attempt_ts.get(round_side_key, 0) or 0)
-        if last_try > 0 and (now_attempt - last_try) < ROUND_RETRY_COOLDOWN_SEC:
+        if (not repro_lowcent_exec) and last_try > 0 and (now_attempt - last_try) < ROUND_RETRY_COOLDOWN_SEC:
             return
         # Also prevent duplicate retries on the same exact CID+side.
         last_try_cid_side = float(self._cid_side_attempt_ts.get(cid_side_key, 0) or 0)
-        if last_try_cid_side > 0 and (now_attempt - last_try_cid_side) < ROUND_RETRY_COOLDOWN_SEC:
+        if (not repro_lowcent_exec) and last_try_cid_side > 0 and (now_attempt - last_try_cid_side) < ROUND_RETRY_COOLDOWN_SEC:
             return
         # Never re-enter same round/side if already in pending (handles cross-CID drift).
         for cid_p, (m_p, t_p) in list(self.pending.items()):
             if cid_p == cid and t_p.get("side") == side:
-                return
+                if not repro_lowcent_exec:
+                    return
+                continue
             rk_p = self._round_fingerprint(m=m_p, t=t_p)
             if rk_p == round_fp and t_p.get("side") == side:
-                return
+                if not repro_lowcent_exec:
+                    return
+                continue
         self._round_side_attempt_ts[round_side_key] = now_attempt
         self._cid_side_attempt_ts[cid_side_key] = now_attempt
         self._executing_cids.add(cid)
