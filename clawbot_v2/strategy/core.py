@@ -1260,9 +1260,28 @@ async def _score_market(self, m: dict) -> dict | None:
                 )
 
     # Reproducible low-cent mode:
-    # force cheap side selection so live behavior matches historical method.
+    # force cheap-side selection from live side-token asks (CLOB WS), not synthetic up_price.
     if LOWCENT_REPRO_MODE and duration == 5:
-        side = "Up" if up_price <= (1.0 - up_price) else "Down"
+        tok_up = str(m.get("token_up", "") or "").strip()
+        tok_dn = str(m.get("token_down", "") or "").strip()
+        if (not tok_up) or (not tok_dn):
+            self._skip_tick("repro_missing_tokens")
+            return None
+        bk_up = self._get_clob_ws_book(tok_up, max_age_ms=MAX_ORDERBOOK_AGE_MS)
+        bk_dn = self._get_clob_ws_book(tok_dn, max_age_ms=MAX_ORDERBOOK_AGE_MS)
+        ask_up = float((bk_up or {}).get("best_ask", 0.0) or 0.0) if isinstance(bk_up, dict) else 0.0
+        ask_dn = float((bk_dn or {}).get("best_ask", 0.0) or 0.0) if isinstance(bk_dn, dict) else 0.0
+        # Keep mode deterministic: if live side books are not available, do not fall back to synthetic prices.
+        if ask_up <= 0 or ask_dn <= 0:
+            if self._noisy_log_enabled(f"repro-book-missing:{asset}:{cid}", max(8.0, float(LOG_SKIP_EVERY_SEC))):
+                print(
+                    f"{Y}[MODE-SKIP]{RS} {asset} {duration}m "
+                    f"repro-lowcent missing fresh side books "
+                    f"(ask_up={ask_up:.3f} ask_dn={ask_dn:.3f})"
+                )
+            self._skip_tick("repro_book_missing")
+            return None
+        side = "Up" if ask_up <= ask_dn else "Down"
         side_up = (side == "Up")
         tf_votes = tf_up_votes if side_up else tf_dn_votes
         ob_sig = dw_ob if side_up else -dw_ob
