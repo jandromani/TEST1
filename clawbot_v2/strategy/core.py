@@ -1380,15 +1380,16 @@ async def _score_market(self, m: dict) -> dict | None:
         self._skip_tick("mode_only_5m")
         return None
     if LOWCENT_REPRO_MODE:
-        _time_s = float(mins_left) * 60.0
-        _time_ok = float(LOWCENT_REPRO_WINDOW_MIN_SEC) <= _time_s <= float(LOWCENT_REPRO_WINDOW_MAX_SEC)
+        _total_s = float(duration) * 60.0
+        _elapsed_s = max(0.0, _total_s - float(mins_left) * 60.0)
+        _time_ok = float(LOWCENT_REPRO_WINDOW_MIN_SEC) <= _elapsed_s <= float(LOWCENT_REPRO_WINDOW_MAX_SEC)
         _entry_ok = float(LOWCENT_REPRO_ENTRY_MIN) <= float(regime_entry) < float(LOWCENT_REPRO_ENTRY_MAX)
         if not _time_ok:
             if self._noisy_log_enabled(f"mode-repro-skip:{asset}:{cid}", max(8.0, float(LOG_SKIP_EVERY_SEC))):
                 print(
                     f"{Y}[MODE-SKIP]{RS} {asset} {duration}m "
                     f"score={int(score)} entry={float(regime_entry):.3f} "
-                    f"outside repro-lowcent t=[{LOWCENT_REPRO_WINDOW_MIN_SEC:.0f},{LOWCENT_REPRO_WINDOW_MAX_SEC:.0f}]s "
+                    f"outside repro-lowcent elapsed=[{LOWCENT_REPRO_WINDOW_MIN_SEC:.0f},{LOWCENT_REPRO_WINDOW_MAX_SEC:.0f}]s "
                     f"e=[{LOWCENT_REPRO_ENTRY_MIN:.3f},{LOWCENT_REPRO_ENTRY_MAX:.3f}) "
                     f"why=time"
                 )

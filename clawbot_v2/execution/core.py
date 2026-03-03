@@ -164,8 +164,8 @@ async def _execute_trade(self, sig: dict):
                     except Exception:
                         # If order lookup fails, keep it alive until window-end cleanup.
                         live_now = True
-                secs_left = max(0.0, mins_left * 60.0)
-                win_min = float(LOWCENT_REPRO_WINDOW_MIN_SEC)
+                secs_elapsed = max(0.0, float(duration) * 60.0 - max(0.0, mins_left * 60.0))
+                win_max = float(LOWCENT_REPRO_WINDOW_MAX_SEC)
                 if filled_now:
                     exec_result = {
                         "order_id": existing_oid,
@@ -175,14 +175,14 @@ async def _execute_trade(self, sig: dict):
                         "filled": True,
                     }
                     self._repro_resting_limits.pop(round_side_key, None)
-                elif live_now and secs_left > win_min:
+                elif live_now and secs_elapsed < win_max:
                     if self._noisy_log_enabled(f"resting-live:{sig.get('asset','?')}:{sig.get('side','?')}", LOG_EXEC_EVERY_SEC):
                         print(
                             f"{B}[LIMIT-REST]{RS} {sig.get('asset','?')} {sig.get('side','?')} "
-                            f"active oid={existing_oid[:10]}.. until T-{win_min:.0f}s"
+                            f"active oid={existing_oid[:10]}.. until +{win_max:.0f}s elapsed"
                         )
                     return
-                elif live_now and secs_left <= win_min:
+                elif live_now and secs_elapsed >= win_max:
                     try:
                         await asyncio.get_running_loop().run_in_executor(None, lambda: self.clob.cancel(existing_oid))
                     except Exception:
@@ -190,7 +190,7 @@ async def _execute_trade(self, sig: dict):
                     self._repro_resting_limits.pop(round_side_key, None)
                     print(
                         f"{Y}[LIMIT-REST]{RS} {sig.get('asset','?')} {sig.get('side','?')} "
-                        f"window ended -> cancel oid={existing_oid[:10]}.."
+                        f"window ended (+{win_max:.0f}s) -> cancel oid={existing_oid[:10]}.."
                     )
                     return
                 else:
@@ -1025,22 +1025,22 @@ async def _place_order(self, token_id, side, price, size_usdc, asset, duration, 
                 return {"order_id": order_id, "fill_price": maker_price, "mode": "maker", "notional_usdc": size_usdc, "filled": True}
 
             if repro_strict_limit:
-                secs_left = max(0.0, mins_left * 60.0)
-                win_min = float(LOWCENT_REPRO_WINDOW_MIN_SEC)
-                if secs_left <= win_min:
+                secs_elapsed = max(0.0, float(duration) * 60.0 - max(0.0, mins_left * 60.0))
+                win_max = float(LOWCENT_REPRO_WINDOW_MAX_SEC)
+                if secs_elapsed >= win_max:
                     try:
                         await loop.run_in_executor(None, lambda: self.clob.cancel(order_id))
                     except Exception:
                         pass
                     print(
                         f"{Y}[LIMIT-REST]{RS} {asset} {side} posted too late "
-                        f"(secs_left={secs_left:.1f} <= {win_min:.1f}) -> cancel"
+                        f"(elapsed={secs_elapsed:.1f}s >= {win_max:.1f}s) -> cancel"
                     )
                     print(f"{Y}[EXEC-RESULT]{RS} {asset} {side} no-fill reason=limit_window_closed")
                     return None
                 print(
                     f"{G}[LIMIT-REST]{RS} {asset} {side} resting @ {maker_price:.3f} "
-                    f"oid={order_id[:10]}.. until T-{win_min:.0f}s"
+                    f"oid={order_id[:10]}.. until +{win_max:.0f}s elapsed"
                 )
                 return {
                     "order_id": order_id,

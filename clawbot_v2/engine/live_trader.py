@@ -3120,7 +3120,7 @@ class LiveTrader:
         if LOWCENT_REPRO_MODE:
             print(
                 f"{B}[BOOT]{RS} strategy=LOWCENT_REPRO "
-                f"window=[T-{LOWCENT_REPRO_WINDOW_MAX_SEC:.0f}s,T-{LOWCENT_REPRO_WINDOW_MIN_SEC:.0f}s] "
+                f"window=[+{LOWCENT_REPRO_WINDOW_MIN_SEC:.0f}s,+{LOWCENT_REPRO_WINDOW_MAX_SEC:.0f}s elapsed] "
                 f"entry=[{LOWCENT_REPRO_ENTRY_MIN:.3f},{LOWCENT_REPRO_ENTRY_MAX:.3f}) "
                 f"side=cheap-token"
             )
