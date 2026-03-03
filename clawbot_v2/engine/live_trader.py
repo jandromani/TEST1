@@ -9705,10 +9705,41 @@ class LiveTrader:
                     if held <= 0.0001:
                         continue
                     idx = 1 if winner == "Up" else 2
-                    if not await self._is_redeem_claimable(
+                    _claimable = await self._is_redeem_claimable(
                         ctf=ctf, collat=collat, acct_addr=acct.address,
                         cid_bytes=cid_bytes, index_set=idx, loop=loop
-                    ):
+                    )
+                    if not _claimable:
+                        # Important: keep unresolved winners in pending_redeem so the normal
+                        # redeem loop can retry as soon as claimable flips on-chain.
+                        if cid not in self.pending_redeem and cid not in self.pending:
+                            title = str(d.get("title", "") or "")
+                            asset = ("BTC" if "Bitcoin" in title else "ETH" if "Ethereum" in title
+                                     else "SOL" if "Solana" in title else "XRP" if "XRP" in title else "?")
+                            m_s = {"conditionId": cid, "question": title[:45]}
+                            t_s = {
+                                "side": winner,
+                                "asset": asset,
+                                "size": float(held),
+                                "entry": 0.5,
+                                "duration": 0,
+                                "mkt_price": 0.5,
+                                "mins_left": 0,
+                                "open_price": 0.0,
+                                "token_id": "",
+                                "order_id": "FORCE-BACKFILL",
+                            }
+                            self.pending.pop(cid, None)
+                            self.pending_redeem[cid] = (m_s, t_s)
+                            print(
+                                f"{B}[FORCE-QUEUE]{RS} {winner} {title[:36]} | "
+                                f"held={held:.4f} (not claimable yet) | cid={self._short_cid(cid)}"
+                            )
+                        elif self._noisy_log_enabled(f"force-wait:{cid}", 60):
+                            print(
+                                f"{B}[FORCE-WAIT]{RS} {winner} not claimable yet | "
+                                f"held={held:.4f} | cid={self._short_cid(cid)}"
+                            )
                         continue
                     try:
                         tx_hash = await self._submit_redeem_tx(
