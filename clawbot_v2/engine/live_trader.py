@@ -697,6 +697,15 @@ REGIME_BUCKET_ONLY_LATE_MINS_LEFT = float(os.environ.get("REGIME_BUCKET_ONLY_LAT
 LOWCENT_TEST_ALL_SCORES_5M = os.environ.get("LOWCENT_TEST_ALL_SCORES_5M", "true").lower() == "true"
 LOWCENT_TEST_MIN_SIZE_ENABLED = os.environ.get("LOWCENT_TEST_MIN_SIZE_ENABLED", "true").lower() == "true"
 LOWCENT_TEST_MIN_SIZE_USDC = float(os.environ.get("LOWCENT_TEST_MIN_SIZE_USDC", "0.99"))
+# Reproducible low-cent mode (historical Polymarket method):
+# - buy cheap side only
+# - enter in pre-close window [T-170s, T-35s]
+# - constrain side-token entry to configured band
+LOWCENT_REPRO_MODE = os.environ.get("LOWCENT_REPRO_MODE", "false").lower() == "true"
+LOWCENT_REPRO_WINDOW_MIN_SEC = float(os.environ.get("LOWCENT_REPRO_WINDOW_MIN_SEC", "35"))
+LOWCENT_REPRO_WINDOW_MAX_SEC = float(os.environ.get("LOWCENT_REPRO_WINDOW_MAX_SEC", "170"))
+LOWCENT_REPRO_ENTRY_MIN = float(os.environ.get("LOWCENT_REPRO_ENTRY_MIN", "0.105"))
+LOWCENT_REPRO_ENTRY_MAX = float(os.environ.get("LOWCENT_REPRO_ENTRY_MAX", "0.165"))
 FIVE_M_RUNTIME_GUARD_ENABLED = os.environ.get("FIVE_M_RUNTIME_GUARD_ENABLED", "false").lower() == "true"
 FIVE_M_GUARD_WINDOW = int(os.environ.get("FIVE_M_GUARD_WINDOW", "20"))
 FIVE_M_GUARD_DISABLE_MIN_OUTCOMES = int(os.environ.get("FIVE_M_GUARD_DISABLE_MIN_OUTCOMES", "12"))

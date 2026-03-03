@@ -1259,6 +1259,18 @@ async def _score_market(self, m: dict) -> dict | None:
                     f"entry={cheap_entry_now:.2f} move={move_pct*100:.2f}% mins_left={mins_left:.1f}"
                 )
 
+    # Reproducible low-cent mode:
+    # force cheap side selection so live behavior matches historical method.
+    if LOWCENT_REPRO_MODE and duration == 5:
+        side = "Up" if up_price <= (1.0 - up_price) else "Down"
+        side_up = (side == "Up")
+        tf_votes = tf_up_votes if side_up else tf_dn_votes
+        ob_sig = dw_ob if side_up else -dw_ob
+        cl_agree = True
+        if cl_now > 0 and open_price > 0:
+            cl_agree = (cl_now > open_price) == side_up
+        imbalance_confirms = ob_sig > IMBALANCE_CONFIRM_MIN
+
     # Bet the signal direction — EV_net and execution quality drive growth.
     entry = up_price if side == "Up" else (1 - up_price)
     # Keep edge/prob aligned with final side after pre-bid/copyflow adjustments.
@@ -1269,7 +1281,7 @@ async def _score_market(self, m: dict) -> dict | None:
     edge      = max(edge, base_edge)
     pred_variant = ""
     pred_variant_probs = {}
-    if self._pred_agent is not None:
+    if (self._pred_agent is not None) and (not LOWCENT_REPRO_MODE):
         try:
             _entry_hint = up_price if side == "Up" else (1.0 - up_price)
             _buck_key = self._bucket_key(duration, score, _entry_hint)
@@ -1332,7 +1344,27 @@ async def _score_market(self, m: dict) -> dict | None:
     if duration != 5:
         self._skip_tick("mode_only_5m")
         return None
-    if REGIME_BUCKET_ONLY_ENABLED:
+    if LOWCENT_REPRO_MODE:
+        _time_s = float(mins_left) * 60.0
+        _time_ok = float(LOWCENT_REPRO_WINDOW_MIN_SEC) <= _time_s <= float(LOWCENT_REPRO_WINDOW_MAX_SEC)
+        _entry_ok = float(LOWCENT_REPRO_ENTRY_MIN) <= float(regime_entry) < float(LOWCENT_REPRO_ENTRY_MAX)
+        if not (_time_ok and _entry_ok):
+            if self._noisy_log_enabled(f"mode-repro-skip:{asset}:{cid}", max(8.0, float(LOG_SKIP_EVERY_SEC))):
+                _why = []
+                if not _time_ok:
+                    _why.append("time")
+                if not _entry_ok:
+                    _why.append("entry")
+                print(
+                    f"{Y}[MODE-SKIP]{RS} {asset} {duration}m "
+                    f"score={int(score)} entry={float(regime_entry):.3f} "
+                    f"outside repro-lowcent t=[{LOWCENT_REPRO_WINDOW_MIN_SEC:.0f},{LOWCENT_REPRO_WINDOW_MAX_SEC:.0f}]s "
+                    f"e=[{LOWCENT_REPRO_ENTRY_MIN:.3f},{LOWCENT_REPRO_ENTRY_MAX:.3f}) "
+                    f"why={'+'.join(_why) or 'unknown'}"
+                )
+            self._skip_tick("repro_lowcent_filter")
+            return None
+    elif REGIME_BUCKET_ONLY_ENABLED:
         _dur_ok = (duration == REGIME_BUCKET_ONLY_DURATION)
         # Optional score-band filter for best live bucket quality.
         if REGIME_BUCKET_ONLY_USE_SCORE_BAND:
@@ -1514,7 +1546,7 @@ async def _score_market(self, m: dict) -> dict | None:
 
     fair_side_entry = up_price if side == "Up" else (1.0 - up_price)
     chosen_ask = _best_ask_from(pm_book_data)
-    if opp_token_id:
+    if opp_token_id and (not LOWCENT_REPRO_MODE):
         opp_book = self._get_clob_ws_book(opp_token_id, max_age_ms=CLOB_MARKET_WS_MAX_AGE_MS)
         if opp_book is None:
             opp_book = await self._fetch_pm_book_safe(opp_token_id)
@@ -1557,7 +1589,7 @@ async def _score_market(self, m: dict) -> dict | None:
     # When price trend forces a side (e.g. all Up) but that side's CLOB entry
     # is too expensive (>58c → payout <1.72x), check if the opposite token
     # offers meaningfully better EV. Prevents "all Up, all blocked" deadzone.
-    if (OPP_EVAL_ENABLED and not booster_eval and duration >= CORE_DURATION_MIN
+    if ((not LOWCENT_REPRO_MODE) and OPP_EVAL_ENABLED and not booster_eval and duration >= CORE_DURATION_MIN
             and live_entry > OPP_EVAL_TRIGGER_ENTRY and opp_token_id
             and side == ("Up" if current >= open_price else "Down")):
         _opp_bk = self._get_clob_ws_book(opp_token_id, max_age_ms=CLOB_MARKET_WS_MAX_AGE_MS)
