@@ -109,10 +109,73 @@ async def _execute_trade(self, sig: dict):
         duration = int(sig.get("duration", 0) or 0)
         mins_left = float(sig.get("mins_left", 0.0) or 0.0)
         repro_lowcent_exec = bool(LOWCENT_REPRO_MODE and duration <= 5)
+        if not hasattr(self, "_repro_resting_limits"):
+            self._repro_resting_limits = {}
         if repro_lowcent_exec:
             # Hard lock execution mode: true LIMIT-only in repro 5m path.
             sig["use_limit"] = True
             sig["force_taker"] = False
+            # True resting-limit lifecycle:
+            # - place once at window start
+            # - keep active through window
+            # - cancel only after window closes if still unfilled
+            rest = self._repro_resting_limits.get(round_side_key) or {}
+            existing_oid = str(rest.get("order_id", "") or "")
+            if existing_oid:
+                ev = dict(self._order_event_cache.get(existing_oid) or {})
+                ev_status = str(ev.get("status", "") or "").lower()
+                filled_now = ev_status == "filled"
+                live_now = ev_status in ("live", "pending", "open")
+                if not filled_now and not live_now:
+                    try:
+                        info = await asyncio.get_running_loop().run_in_executor(
+                            None, lambda: self.clob.get_order(existing_oid)
+                        )
+                        if isinstance(info, dict):
+                            st = str(info.get("status", "") or "").lower()
+                            if st in ("matched", "filled"):
+                                filled_now = True
+                            elif st in ("live", "open", "pending"):
+                                live_now = True
+                    except Exception:
+                        # If order lookup fails, keep it alive until window-end cleanup.
+                        live_now = True
+                secs_left = max(0.0, mins_left * 60.0)
+                win_min = float(LOWCENT_REPRO_WINDOW_MIN_SEC)
+                if filled_now:
+                    exec_result = {
+                        "order_id": existing_oid,
+                        "fill_price": float(rest.get("maker_price", sig.get("entry", 0.0)) or sig.get("entry", 0.0)),
+                        "mode": "maker_resting_fill",
+                        "notional_usdc": float(rest.get("size_usdc", sig.get("size", 0.0)) or sig.get("size", 0.0)),
+                        "filled": True,
+                    }
+                    self._repro_resting_limits.pop(round_side_key, None)
+                elif live_now and secs_left > win_min:
+                    if self._noisy_log_enabled(f"resting-live:{sig.get('asset','?')}:{sig.get('side','?')}", LOG_EXEC_EVERY_SEC):
+                        print(
+                            f"{B}[LIMIT-REST]{RS} {sig.get('asset','?')} {sig.get('side','?')} "
+                            f"active oid={existing_oid[:10]}.. until T-{win_min:.0f}s"
+                        )
+                    return
+                elif live_now and secs_left <= win_min:
+                    try:
+                        await asyncio.get_running_loop().run_in_executor(None, lambda: self.clob.cancel(existing_oid))
+                    except Exception:
+                        pass
+                    self._repro_resting_limits.pop(round_side_key, None)
+                    print(
+                        f"{Y}[LIMIT-REST]{RS} {sig.get('asset','?')} {sig.get('side','?')} "
+                        f"window ended -> cancel oid={existing_oid[:10]}.."
+                    )
+                    return
+                else:
+                    # No longer live (killed/rejected/canceled): clear and allow repost.
+                    self._repro_resting_limits.pop(round_side_key, None)
+            else:
+                exec_result = None
+        else:
+            exec_result = None
         min_left_gate = MIN_MINS_LEFT_5M if duration <= 5 else MIN_MINS_LEFT_15M
         if (not repro_lowcent_exec) and mins_left <= min_left_gate:
             if LOG_VERBOSE:
@@ -220,21 +283,30 @@ async def _execute_trade(self, sig: dict):
             )
         t_ord = _time.perf_counter()
         force_taker_now = True if ALWAYS_LIMIT_FOK_EXEC else bool(sig["force_taker"])
-        exec_result = await self._place_order(
-            sig["token_id"], sig["side"], sig["entry"], sig["size"],
-            sig["asset"], sig["duration"], sig["mins_left"],
-            sig["true_prob"], sig["cl_agree"],
-            min_edge_req=sig["min_edge"], force_taker=force_taker_now,
-            score=sig["score"], pm_book_data=sig.get("pm_book_data"),
-            use_limit=sig.get("use_limit", False),
-            max_entry_allowed=sig.get("max_entry_allowed", MAX_ENTRY_PRICE),
-            hc15_mode=sig.get("hc15_mode", False),
-            hc15_fallback_cap=HC15_FALLBACK_MAX_ENTRY,
-            core_position=(not is_booster),
-        )
+        if exec_result is None:
+            exec_result = await self._place_order(
+                sig["token_id"], sig["side"], sig["entry"], sig["size"],
+                sig["asset"], sig["duration"], sig["mins_left"],
+                sig["true_prob"], sig["cl_agree"],
+                min_edge_req=sig["min_edge"], force_taker=force_taker_now,
+                score=sig["score"], pm_book_data=sig.get("pm_book_data"),
+                use_limit=sig.get("use_limit", False),
+                max_entry_allowed=sig.get("max_entry_allowed", MAX_ENTRY_PRICE),
+                hc15_mode=sig.get("hc15_mode", False),
+                hc15_fallback_cap=HC15_FALLBACK_MAX_ENTRY,
+                core_position=(not is_booster),
+            )
         self._perf_update("order_ms", (_time.perf_counter() - t_ord) * 1000.0)
         order_id = (exec_result or {}).get("order_id", "")
-        filled = exec_result is not None
+        filled = bool((exec_result or {}).get("filled", exec_result is not None))
+        if repro_lowcent_exec and exec_result and (not filled) and order_id:
+            self._repro_resting_limits[round_side_key] = {
+                "order_id": order_id,
+                "maker_price": float((exec_result or {}).get("fill_price", sig.get("entry", 0.0)) or sig.get("entry", 0.0)),
+                "size_usdc": float((exec_result or {}).get("notional_usdc", sig.get("size", 0.0)) or sig.get("size", 0.0)),
+                "placed_ts": _time.time(),
+            }
+            return
         actual_size_usdc = float((exec_result or {}).get("notional_usdc", sig["size"]) or sig["size"])
         fill_price = float((exec_result or {}).get("fill_price", sig["entry"]) or sig["entry"])
         slip_bps = ((fill_price - sig["entry"]) / max(sig["entry"], 1e-9)) * 10000.0
@@ -864,7 +936,33 @@ async def _place_order(self, token_id, side, price, size_usdc, asset, duration, 
                 print(f"{G}[MAKER FILL]{RS} {side} {asset} {duration}m | "
                       f"${size_usdc:.2f} @ {maker_price:.3f} | payout=${payout:.2f} | "
                       f"Bank ${self.bankroll:.2f}")
-                return {"order_id": order_id, "fill_price": maker_price, "mode": "maker", "notional_usdc": size_usdc}
+                return {"order_id": order_id, "fill_price": maker_price, "mode": "maker", "notional_usdc": size_usdc, "filled": True}
+
+            if repro_strict_limit:
+                secs_left = max(0.0, mins_left * 60.0)
+                win_min = float(LOWCENT_REPRO_WINDOW_MIN_SEC)
+                if secs_left <= win_min:
+                    try:
+                        await loop.run_in_executor(None, lambda: self.clob.cancel(order_id))
+                    except Exception:
+                        pass
+                    print(
+                        f"{Y}[LIMIT-REST]{RS} {asset} {side} posted too late "
+                        f"(secs_left={secs_left:.1f} <= {win_min:.1f}) -> cancel"
+                    )
+                    print(f"{Y}[EXEC-RESULT]{RS} {asset} {side} no-fill reason=limit_window_closed")
+                    return None
+                print(
+                    f"{G}[LIMIT-REST]{RS} {asset} {side} resting @ {maker_price:.3f} "
+                    f"oid={order_id[:10]}.. until T-{win_min:.0f}s"
+                )
+                return {
+                    "order_id": order_id,
+                    "fill_price": maker_price,
+                    "mode": "maker_resting_pending",
+                    "notional_usdc": size_usdc,
+                    "filled": False,
+                }
 
             # Ultra-low-latency waits to avoid blocking other opportunities.
             poll_interval = MAKER_POLL_5M_SEC if duration <= 5 else MAKER_POLL_15M_SEC
@@ -917,7 +1015,7 @@ async def _place_order(self, token_id, side, price, size_usdc, asset, duration, 
                 print(f"{G}[MAKER FILL]{RS} {side} {asset} {duration}m | "
                       f"${size_usdc:.2f} @ {maker_price:.3f} | payout=${payout:.2f} | "
                       f"Bank ${self.bankroll:.2f}")
-                return {"order_id": order_id, "fill_price": maker_price, "mode": "maker", "notional_usdc": size_usdc}
+                return {"order_id": order_id, "fill_price": maker_price, "mode": "maker", "notional_usdc": size_usdc, "filled": True}
 
             # Partial maker fill protection:
             # status may remain "live" while filled_size > 0. Track it so position is not missed.
@@ -939,7 +1037,7 @@ async def _place_order(self, token_id, side, price, size_usdc, asset, duration, 
                         self.bankroll -= min(size_usdc, fill_usdc)
                         print(f"{Y}[PARTIAL]{RS} {side} {asset} {duration}m | "
                               f"filled≈${fill_usdc:.2f} @ {maker_price:.3f} | tracking open position")
-                        return {"order_id": order_id, "fill_price": maker_price, "mode": "maker_partial", "notional_usdc": min(size_usdc, fill_usdc)}
+                        return {"order_id": order_id, "fill_price": maker_price, "mode": "maker_partial", "notional_usdc": min(size_usdc, fill_usdc), "filled": True}
                     print(
                         f"{Y}[PARTIAL-DUST]{RS} {side} {asset} {duration}m | "
                         f"filled≈${fill_usdc:.2f} @ {maker_price:.3f} < track_min=${partial_track_floor:.2f} "
@@ -1037,7 +1135,7 @@ async def _place_order(self, token_id, side, price, size_usdc, asset, duration, 
                 self._cache_order_event(order_id, "filled", 0.0)
                 print(f"{Y}[TAKER FILL]{RS} {side} {asset} {duration}m | "
                       f"${size_usdc:.2f} @ {taker_price:.3f} | Bank ${self.bankroll:.2f}")
-                return {"order_id": order_id, "fill_price": taker_price, "mode": "fok_fallback", "notional_usdc": size_usdc}
+                return {"order_id": order_id, "fill_price": taker_price, "mode": "fok_fallback", "notional_usdc": size_usdc, "filled": True}
 
             # FOK should not partially fill, but keep single state-check for exchange race.
             if order_id:
@@ -1053,7 +1151,7 @@ async def _place_order(self, token_id, side, price, size_usdc, asset, duration, 
                         self._cache_order_event(order_id, "filled", 0.0)
                         print(f"{Y}[TAKER FILL]{RS} {side} {asset} {duration}m | "
                               f"${size_usdc:.2f} @ {taker_price:.3f} | Bank ${self.bankroll:.2f}")
-                        return {"order_id": order_id, "fill_price": taker_price, "mode": "fok_fallback", "notional_usdc": size_usdc}
+                        return {"order_id": order_id, "fill_price": taker_price, "mode": "fok_fallback", "notional_usdc": size_usdc, "filled": True}
                 except Exception:
                     self._errors.tick("order_status_check", print, every=50)
             print(f"{Y}[ORDER] Both maker and FOK taker unfilled — cancelled{RS}")
