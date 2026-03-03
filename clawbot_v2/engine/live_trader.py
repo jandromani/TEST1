@@ -3116,6 +3116,13 @@ class LiveTrader:
             f"{B}[BOOT]{RS} require(leader/book/vol)="
             f"{REQUIRE_LEADER_FLOW}/{REQUIRE_ORDERBOOK_WS}/{REQUIRE_VOLUME_SIGNAL}"
         )
+        if LOWCENT_REPRO_MODE:
+            print(
+                f"{B}[BOOT]{RS} strategy=LOWCENT_REPRO "
+                f"window=[T-{LOWCENT_REPRO_WINDOW_MAX_SEC:.0f}s,T-{LOWCENT_REPRO_WINDOW_MIN_SEC:.0f}s] "
+                f"entry=[{LOWCENT_REPRO_ENTRY_MIN:.3f},{LOWCENT_REPRO_ENTRY_MAX:.3f}) "
+                f"side=cheap-token"
+            )
         print(
             f"{B}[BOOT]{RS} "
             f"max_win_mode={MAX_WIN_MODE} "
