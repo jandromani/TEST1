@@ -2512,6 +2512,17 @@ async def _score_market(self, m: dict) -> dict | None:
                 f"{B}[SIZE-TUNE]{RS} {asset} {duration}m {side} autopilot "
                 f"{self._autopilot_mode} x{ap_mult:.2f} ${old_size:.2f}->${size:.2f}"
             )
+    # Optional fixed stake override (user-controlled): keeps per-trade notional constant.
+    if float(FIXED_TRADE_SIZE_USDC or 0.0) > 0.0:
+        fixed = round(float(FIXED_TRADE_SIZE_USDC), 2)
+        old_size = float(size)
+        # Keep exchange/execution safety floor.
+        size = max(float(MIN_EXEC_NOTIONAL_USDC), fixed)
+        if self._noisy_log_enabled(f"fixed-size:{asset}:{cid}", LOG_FLOW_EVERY_SEC):
+            print(
+                f"{B}[SIZE-TUNE]{RS} {asset} {duration}m {side} fixed "
+                f"${old_size:.2f}->${size:.2f}"
+            )
     # Immediate fills: FOK on strong signal, GTC limit otherwise
     # Limit orders (use_limit=True) are always GTC — force_taker stays False
     force_taker = (not use_limit) and (
