@@ -8825,7 +8825,7 @@ class LiveTrader:
                                   f"now=${cur_fmt} move={move:+.3f}% | {m['mins_left']:.1f}min left{RS}")
                 if ONLY_5M_MODE and int(m.get("duration", 0) or 0) != 5:
                     continue
-                if NO_GATES_MODE or (cid not in self.seen):
+                if LOWCENT_REPRO_MODE or NO_GATES_MODE or (cid not in self.seen):
                     candidates.append(m)
                 else:
                     blocked_seen += 1

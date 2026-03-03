@@ -1277,8 +1277,9 @@ async def _score_market(self, m: dict) -> dict | None:
             bk_dn = await self._fetch_pm_book_safe(tok_dn)
         ask_up = float((bk_up or {}).get("best_ask", 0.0) or 0.0) if isinstance(bk_up, dict) else 0.0
         ask_dn = float((bk_dn or {}).get("best_ask", 0.0) or 0.0) if isinstance(bk_dn, dict) else 0.0
-        # Keep mode deterministic: if live side books are not available, do not fall back to synthetic prices.
-        if ask_up <= 0 or ask_dn <= 0:
+        # Keep mode deterministic with real side books.
+        # Skip only when BOTH sides are missing; if one side is present, use that side.
+        if ask_up <= 0 and ask_dn <= 0:
             if self._noisy_log_enabled(f"repro-book-missing:{asset}:{cid}", max(8.0, float(LOG_SKIP_EVERY_SEC))):
                 print(
                     f"{Y}[MODE-SKIP]{RS} {asset} {duration}m "
@@ -1287,7 +1288,16 @@ async def _score_market(self, m: dict) -> dict | None:
                 )
             self._skip_tick("repro_book_missing")
             return None
-        side = "Up" if ask_up <= ask_dn else "Down"
+        if ask_up > 0 and ask_dn <= 0:
+            side = "Up"
+            if self._noisy_log_enabled(f"repro-book-partial:{asset}:{cid}", max(8.0, float(LOG_SKIP_EVERY_SEC))):
+                print(f"{B}[MODE-INFO]{RS} {asset} {duration}m repro-lowcent partial book: ask_dn missing -> side=Up")
+        elif ask_dn > 0 and ask_up <= 0:
+            side = "Down"
+            if self._noisy_log_enabled(f"repro-book-partial:{asset}:{cid}", max(8.0, float(LOG_SKIP_EVERY_SEC))):
+                print(f"{B}[MODE-INFO]{RS} {asset} {duration}m repro-lowcent partial book: ask_up missing -> side=Down")
+        else:
+            side = "Up" if ask_up <= ask_dn else "Down"
         side_up = (side == "Up")
         tf_votes = tf_up_votes if side_up else tf_dn_votes
         ob_sig = dw_ob if side_up else -dw_ob
