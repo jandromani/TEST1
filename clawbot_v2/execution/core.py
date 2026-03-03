@@ -109,6 +109,10 @@ async def _execute_trade(self, sig: dict):
         duration = int(sig.get("duration", 0) or 0)
         mins_left = float(sig.get("mins_left", 0.0) or 0.0)
         repro_lowcent_exec = bool(LOWCENT_REPRO_MODE and duration <= 5)
+        if repro_lowcent_exec:
+            # Hard lock execution mode: true LIMIT-only in repro 5m path.
+            sig["use_limit"] = True
+            sig["force_taker"] = False
         min_left_gate = MIN_MINS_LEFT_5M if duration <= 5 else MIN_MINS_LEFT_15M
         if (not repro_lowcent_exec) and mins_left <= min_left_gate:
             if LOG_VERBOSE:
@@ -433,6 +437,9 @@ async def _place_order(self, token_id, side, price, size_usdc, asset, duration, 
     if float(size_usdc or 0.0) < hard_min_notional:
         return None
 
+    if bool(LOWCENT_REPRO_MODE and int(duration or 0) <= 5):
+        use_limit = True
+        force_taker = False
     for attempt in range(max(1, ORDER_RETRY_MAX)):
         try:
             loop = asyncio.get_running_loop()
