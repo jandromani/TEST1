@@ -24,6 +24,15 @@ async def _execute_trade(self, sig: dict):
     is_booster = bool(sig.get("booster_mode", False))
     duration_hint = int(sig.get("duration", 0) or 0)
     repro_lowcent_exec = bool(LOWCENT_REPRO_MODE and duration_hint <= 5)
+    max_trade_size = float(MAX_TRADE_SIZE_USDC or 0.0)
+    if repro_lowcent_exec:
+        # Repro strategy requirement: fixed minimum stake, but never above global cap.
+        fixed_size = float(max(1.0, MIN_EXEC_NOTIONAL_USDC))
+        if max_trade_size > 0.0:
+            fixed_size = min(fixed_size, max_trade_size)
+        sig["size"] = float(round(fixed_size, 2))
+    elif max_trade_size > 0.0:
+        sig["size"] = float(round(min(float(sig.get("size", 0.0) or 0.0), max_trade_size), 2))
     round_key = self._round_key(cid=cid, m=m, t=sig)
     round_fp = self._round_fingerprint(cid=cid, m=m, t=sig)
     round_side_key = f"{round_fp}|{side}|{'B' if is_booster else 'N'}"
