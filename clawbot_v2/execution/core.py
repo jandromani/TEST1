@@ -195,6 +195,14 @@ async def _execute_trade(self, sig: dict):
                     return
                 else:
                     # No longer live (killed/rejected/canceled): clear and allow repost.
+                    if self._noisy_log_enabled(
+                        f"resting-closed:{sig.get('asset','?')}:{sig.get('side','?')}",
+                        max(4.0, float(LOG_EXEC_EVERY_SEC)),
+                    ):
+                        print(
+                            f"{Y}[LIMIT-REST]{RS} {sig.get('asset','?')} {sig.get('side','?')} "
+                            f"closed oid={existing_oid[:10]}.. status={ev_status or 'unknown'} -> clear"
+                        )
                     self._repro_resting_limits.pop(round_side_key, None)
             else:
                 exec_result = None
