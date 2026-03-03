@@ -538,10 +538,12 @@ async def _place_order(self, token_id, side, price, size_usdc, asset, duration, 
     # Keep execution floor aligned with adaptive sizing logic.
     # Using MIN_BET_ABS here can reject valid autopilot-sized trades.
     hard_min_notional = max(float(MIN_EXEC_NOTIONAL_USDC), 1.0)
+    # Cent-level tolerance prevents float/share-step artifacts around strict $1.00 sizing.
+    notional_eps = 0.01
     max_trade_size_usdc = float(MAX_TRADE_SIZE_USDC or 0.0)
     if max_trade_size_usdc > 0.0:
         max_trade_size_usdc = float(round(max_trade_size_usdc, 2))
-        if max_trade_size_usdc + 1e-9 < hard_min_notional:
+        if max_trade_size_usdc + notional_eps < hard_min_notional:
             print(
                 f"{Y}[SKIP]{RS} {asset} {side} invalid sizing config: "
                 f"MAX_TRADE_SIZE_USDC=${max_trade_size_usdc:.2f} < min_notional=${hard_min_notional:.2f}"
@@ -569,7 +571,7 @@ async def _place_order(self, token_id, side, price, size_usdc, asset, duration, 
                 raw_shares = max(0.0, intended_usdc) / px
                 # Execution hard-min is in USDC, not only in shares.
                 min_notional = max(hard_min_notional, min_shares * px)
-                if max_trade_size_usdc > 0.0 and min_notional > (max_trade_size_usdc + 1e-9):
+                if max_trade_size_usdc > 0.0 and min_notional > (max_trade_size_usdc + notional_eps):
                     # Infeasible with current cap (e.g. high-cent where min shares cost > cap).
                     return 0.0, float(min_notional)
                 shares_floor = min_notional / px
@@ -581,7 +583,7 @@ async def _place_order(self, token_id, side, price, size_usdc, asset, duration, 
                 while notional_raw + 1e-9 < min_safe_notional:
                     shares = round(shares + 0.01, 2)
                     notional_raw = shares * px
-                if max_trade_size_usdc > 0.0 and notional_raw > (max_trade_size_usdc + 1e-9):
+                if max_trade_size_usdc > 0.0 and notional_raw > (max_trade_size_usdc + notional_eps):
                     return 0.0, float(notional_raw)
                 return shares, round(notional_raw, 2)
 
@@ -592,7 +594,7 @@ async def _place_order(self, token_id, side, price, size_usdc, asset, duration, 
                     amt = float(round(hard_min_notional, 2))
                 if max_trade_size_usdc > 0.0:
                     amt = float(round(min(amt, max_trade_size_usdc), 2))
-                if amt + 1e-9 < hard_min_notional:
+                if amt + notional_eps < hard_min_notional:
                     return 0.0
                 return float(round(amt, 2))
 
@@ -711,7 +713,6 @@ async def _place_order(self, token_id, side, price, size_usdc, asset, duration, 
             min_notional_px = float(price) if use_limit else float(best_ask)
             _, min_notional = _normalize_order_size(min_notional_px, 0.0)
             # Use cent-level tolerance to avoid float artifacts like "1.00 > 1.00".
-            notional_eps = 0.005
             if max_trade_size_usdc > 0.0 and min_notional > (max_trade_size_usdc + notional_eps):
                 print(
                     f"{Y}[SKIP]{RS} {asset} {side} min-order notional=${min_notional:.2f} "
