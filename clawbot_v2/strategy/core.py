@@ -2269,7 +2269,18 @@ async def _score_market(self, m: dict) -> dict | None:
                     )
 
     if size < MIN_EXEC_NOTIONAL_USDC:
-        return None
+        if LOWCENT_REPRO_MODE and duration <= 5:
+            # Repro low-cent mode must always produce an executable signal size.
+            # Do not silently drop after MODE-LIMIT; clamp to execution floor.
+            old_size = float(size)
+            size = float(max(MIN_EXEC_NOTIONAL_USDC, 1.0))
+            if self._noisy_log_enabled(f"repro-size-floor:{asset}:{cid}", LOG_FLOW_EVERY_SEC):
+                print(
+                    f"{B}[SIZE-FLOOR]{RS} {asset} {duration}m repro "
+                    f"${old_size:.2f}->${size:.2f} (min_exec)"
+                )
+        else:
+            return None
 
     # 5m low-cent test mode: enforce only a minimal notional floor (~$1), never hard-cap.
     if (
