@@ -706,8 +706,13 @@ async def _place_order(self, token_id, side, price, size_usdc, asset, duration, 
             mid_est        = (best_bid + best_ask) / 2
             maker_edge_est = true_prob - mid_est
             # Ensure order notional always satisfies CLOB minimum size in shares.
-            _, min_notional = _normalize_order_size(best_ask, 0.0)
-            if max_trade_size_usdc > 0.0 and min_notional > (max_trade_size_usdc + 1e-9):
+            # In strict limit mode, compute minimum against target limit price (not live best_ask),
+            # otherwise we can wrongly skip valid low-cent resting orders.
+            min_notional_px = float(price) if use_limit else float(best_ask)
+            _, min_notional = _normalize_order_size(min_notional_px, 0.0)
+            # Use cent-level tolerance to avoid float artifacts like "1.00 > 1.00".
+            notional_eps = 0.005
+            if max_trade_size_usdc > 0.0 and min_notional > (max_trade_size_usdc + notional_eps):
                 print(
                     f"{Y}[SKIP]{RS} {asset} {side} min-order notional=${min_notional:.2f} "
                     f"> max_trade=${max_trade_size_usdc:.2f}"
@@ -969,7 +974,7 @@ async def _place_order(self, token_id, side, price, size_usdc, asset, duration, 
                 )
                 return None
             size_usdc = maker_notional
-            if max_trade_size_usdc > 0.0 and size_usdc > (max_trade_size_usdc + 1e-9):
+            if max_trade_size_usdc > 0.0 and size_usdc > (max_trade_size_usdc + notional_eps):
                 print(
                     f"{Y}[SKIP]{RS} {asset} {side} normalized size=${size_usdc:.2f} "
                     f"> max_trade=${max_trade_size_usdc:.2f}"
