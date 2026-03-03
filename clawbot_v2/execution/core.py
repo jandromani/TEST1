@@ -115,9 +115,15 @@ async def _execute_trade(self, sig: dict):
         duration = int(sig.get("duration", 0) or 0)
         mins_left = float(sig.get("mins_left", 0.0) or 0.0)
         repro_lowcent_exec = bool(LOWCENT_REPRO_MODE and duration <= 5)
+        max_trade_size = float(MAX_TRADE_SIZE_USDC or 0.0)
         if repro_lowcent_exec:
             # Repro strategy requirement: always use minimum fixed stake.
-            sig["size"] = float(max(1.0, MIN_EXEC_NOTIONAL_USDC))
+            fixed_size = float(max(1.0, MIN_EXEC_NOTIONAL_USDC))
+            if max_trade_size > 0.0:
+                fixed_size = min(fixed_size, max_trade_size)
+            sig["size"] = float(round(fixed_size, 2))
+        if max_trade_size > 0.0:
+            sig["size"] = float(round(min(float(sig.get("size", 0.0) or 0.0), max_trade_size), 2))
         if not hasattr(self, "_repro_resting_limits"):
             self._repro_resting_limits = {}
         if repro_lowcent_exec:
@@ -515,6 +521,16 @@ async def _place_order(self, token_id, side, price, size_usdc, asset, duration, 
     # Keep execution floor aligned with adaptive sizing logic.
     # Using MIN_BET_ABS here can reject valid autopilot-sized trades.
     hard_min_notional = max(float(MIN_EXEC_NOTIONAL_USDC), 1.0)
+    max_trade_size_usdc = float(MAX_TRADE_SIZE_USDC or 0.0)
+    if max_trade_size_usdc > 0.0:
+        max_trade_size_usdc = float(round(max_trade_size_usdc, 2))
+        if max_trade_size_usdc + 1e-9 < hard_min_notional:
+            print(
+                f"{Y}[SKIP]{RS} {asset} {side} invalid sizing config: "
+                f"MAX_TRADE_SIZE_USDC=${max_trade_size_usdc:.2f} < min_notional=${hard_min_notional:.2f}"
+            )
+            return None
+        size_usdc = min(float(size_usdc or 0.0), max_trade_size_usdc)
     if float(size_usdc or 0.0) < hard_min_notional:
         return None
 
@@ -535,25 +551,33 @@ async def _place_order(self, token_id, side, price, size_usdc, asset, duration, 
                 px = max(exec_price, 1e-9)
                 raw_shares = max(0.0, intended_usdc) / px
                 # Execution hard-min is in USDC, not only in shares.
-                # Keep a tiny buffer above $1 to avoid 0.999x rejects on marketable BUYs.
-                min_notional = max(hard_min_notional + 0.01, min_shares * px)
+                min_notional = max(hard_min_notional, min_shares * px)
+                if max_trade_size_usdc > 0.0 and min_notional > (max_trade_size_usdc + 1e-9):
+                    # Infeasible with current cap (e.g. high-cent where min shares cost > cap).
+                    return 0.0, float(min_notional)
                 shares_floor = min_notional / px
                 shares = max(raw_shares, shares_floor)
                 # Ceil to 2 decimals (never round down into sub-$1 notional).
                 shares = (int(shares * 100.0 + 0.999999)) / 100.0
                 notional_raw = shares * px
-                min_safe_notional = hard_min_notional + 0.0001
-                while notional_raw < min_safe_notional:
+                min_safe_notional = hard_min_notional
+                while notional_raw + 1e-9 < min_safe_notional:
                     shares = round(shares + 0.01, 2)
                     notional_raw = shares * px
+                if max_trade_size_usdc > 0.0 and notional_raw > (max_trade_size_usdc + 1e-9):
+                    return 0.0, float(notional_raw)
                 return shares, round(notional_raw, 2)
 
             def _normalize_buy_amount(intended_usdc: float) -> float:
                 # Market BUY maker amount is USDC and must stay at 2 decimals.
                 amt = float(round(max(0.0, intended_usdc), 2))
                 if amt < hard_min_notional:
-                    amt = float(round(hard_min_notional + 0.01, 2))
-                return amt
+                    amt = float(round(hard_min_notional, 2))
+                if max_trade_size_usdc > 0.0:
+                    amt = float(round(min(amt, max_trade_size_usdc), 2))
+                if amt + 1e-9 < hard_min_notional:
+                    return 0.0
+                return float(round(amt, 2))
 
             def _book_depth_usdc(levels, price_cap: float) -> float:
                 depth = 0.0
@@ -577,6 +601,8 @@ async def _place_order(self, token_id, side, price, size_usdc, asset, duration, 
                 px = round(max(0.001, min(exec_price, 0.97)), 4)
                 px_order = round(px, 2)
                 amount_usdc = _normalize_buy_amount(size_usdc)
+                if amount_usdc <= 0.0:
+                    return {"status": "killed", "orderID": "", "id": ""}, float(px_order)
                 order_args = MarketOrderArgs(
                     token_id=token_id,
                     amount=float(amount_usdc),
@@ -664,6 +690,12 @@ async def _place_order(self, token_id, side, price, size_usdc, asset, duration, 
             maker_edge_est = true_prob - mid_est
             # Ensure order notional always satisfies CLOB minimum size in shares.
             _, min_notional = _normalize_order_size(best_ask, 0.0)
+            if max_trade_size_usdc > 0.0 and min_notional > (max_trade_size_usdc + 1e-9):
+                print(
+                    f"{Y}[SKIP]{RS} {asset} {side} min-order notional=${min_notional:.2f} "
+                    f"> max_trade=${max_trade_size_usdc:.2f}"
+                )
+                return None
             if size_usdc < min_notional:
                 if min_notional > self.bankroll:
                     print(
@@ -913,7 +945,19 @@ async def _place_order(self, token_id, side, price, size_usdc, asset, duration, 
                         self._skip_tick("maker_pullback_too_far")
                         return None
             size_tok_m, maker_notional = _normalize_order_size(maker_price_order, size_usdc)
+            if size_tok_m <= 0.0:
+                print(
+                    f"{Y}[SKIP]{RS} {asset} {side} cannot satisfy order min within "
+                    f"max_trade=${max_trade_size_usdc:.2f} (need≈${maker_notional:.2f})"
+                )
+                return None
             size_usdc = maker_notional
+            if max_trade_size_usdc > 0.0 and size_usdc > (max_trade_size_usdc + 1e-9):
+                print(
+                    f"{Y}[SKIP]{RS} {asset} {side} normalized size=${size_usdc:.2f} "
+                    f"> max_trade=${max_trade_size_usdc:.2f}"
+                )
+                return None
             if size_usdc < hard_min_notional:
                 print(
                     f"{Y}[SKIP]{RS} {asset} {side} normalized size=${size_usdc:.2f} "

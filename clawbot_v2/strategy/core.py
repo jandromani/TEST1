@@ -2596,6 +2596,20 @@ async def _score_market(self, m: dict) -> dict | None:
                 f"{B}[SIZE-TUNE]{RS} {asset} {duration}m {side} fixed "
                 f"${old_size:.2f}->${size:.2f}"
             )
+    # Hard cap requested by user: never size above configured max stake.
+    max_trade_size = float(MAX_TRADE_SIZE_USDC or 0.0)
+    if max_trade_size > 0.0:
+        old_size = float(size)
+        size = round(min(old_size, max_trade_size), 2)
+        if size <= 0:
+            return None
+        if (old_size - size) > 1e-9 and self._noisy_log_enabled(
+            f"max-size-cap:{asset}:{cid}", LOG_FLOW_EVERY_SEC
+        ):
+            print(
+                f"{Y}[SIZE-TUNE]{RS} {asset} {duration}m {side} max-cap "
+                f"${old_size:.2f}->${size:.2f}"
+            )
     # Immediate fills: FOK on strong signal, GTC limit otherwise
     # Limit orders (use_limit=True) are always GTC — force_taker stays False
     force_taker = (not use_limit) and (
