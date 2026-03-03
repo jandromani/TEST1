@@ -23,8 +23,45 @@ async def _resolve(self):
     for _, (m_fix, t_fix) in list(self.pending.items()):
         self._force_expired_from_question_if_needed(m_fix, t_fix)
         self._apply_exact_window_from_question(m_fix, t_fix)
-    now     = datetime.now(timezone.utc).timestamp()
-    expired = [k for k, (m, t) in self.pending.items() if m.get("end_ts", 0) > 0 and m["end_ts"] <= now]
+    now = datetime.now(timezone.utc).timestamp()
+
+    def _effective_end_ts(m: dict, t: dict) -> float:
+        """Best-effort end_ts resolver for legacy/synced rows missing exact bounds."""
+        try:
+            et = float((m or {}).get("end_ts", 0) or (t or {}).get("end_ts", 0) or 0)
+            if et > 0:
+                return et
+            st = float((m or {}).get("start_ts", 0) or (t or {}).get("start_ts", 0) or 0)
+            dur = int((t or {}).get("duration", 0) or (m or {}).get("duration", 0) or 0)
+            if st > 0 and dur > 0:
+                return st + dur * 60.0
+            placed = float((t or {}).get("placed_ts", 0) or 0)
+            mins_left_at_entry = float((t or {}).get("mins_left", 0) or 0)
+            if placed > 0 and mins_left_at_entry > 0:
+                return placed + mins_left_at_entry * 60.0
+            if placed > 0 and dur > 0:
+                return placed + dur * 60.0
+        except Exception:
+            pass
+        return 0.0
+
+    expired = []
+    for k, (m, t) in list(self.pending.items()):
+        eff_end = _effective_end_ts(m, t)
+        if eff_end > 0:
+            # Persist recovered end_ts so next cycles are deterministic.
+            if float((m or {}).get("end_ts", 0) or 0) <= 0:
+                try:
+                    m["end_ts"] = eff_end
+                except Exception:
+                    pass
+            if float((t or {}).get("end_ts", 0) or 0) <= 0:
+                try:
+                    t["end_ts"] = eff_end
+                except Exception:
+                    pass
+            if eff_end <= now:
+                expired.append(k)
 
     for k in expired:
         m, trade = self.pending.pop(k)

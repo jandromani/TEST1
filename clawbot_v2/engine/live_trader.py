@@ -4339,10 +4339,17 @@ class LiveTrader:
             side = str(meta.get("side", "?") or "?")
             title = str(meta.get("title", "") or "")[:38]
             end_ts = float(meta.get("end_ts", 0) or 0)
-            if end_ts <= 0:   # H-5: fallback from start_ts + duration
+            if end_ts <= 0:   # H-5: fallback from start_ts + duration / placed_ts + mins_left
                 start_ts_m = float(meta.get("start_ts", 0) or 0)
                 dur_m = int(meta.get("duration", 15) or 15)
-                end_ts = start_ts_m + dur_m * 60 if start_ts_m > 0 else 0
+                placed_ts_m = float(meta.get("placed_ts", 0) or 0)
+                mins_left_entry = float(meta.get("mins_left", 0) or 0)
+                if start_ts_m > 0:
+                    end_ts = start_ts_m + dur_m * 60
+                elif placed_ts_m > 0 and mins_left_entry > 0:
+                    end_ts = placed_ts_m + mins_left_entry * 60.0
+                elif placed_ts_m > 0 and dur_m > 0:
+                    end_ts = placed_ts_m + dur_m * 60.0
             mins_left = max(0.0, (end_ts - now_ts) / 60.0) if end_ts > 0 else 0.0
             if end_ts > 0 and end_ts <= now_ts - 120.0 and cid not in self.pending_redeem:
                 continue
