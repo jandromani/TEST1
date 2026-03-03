@@ -1367,22 +1367,28 @@ async def _score_market(self, m: dict) -> dict | None:
         _time_s = float(mins_left) * 60.0
         _time_ok = float(LOWCENT_REPRO_WINDOW_MIN_SEC) <= _time_s <= float(LOWCENT_REPRO_WINDOW_MAX_SEC)
         _entry_ok = float(LOWCENT_REPRO_ENTRY_MIN) <= float(regime_entry) < float(LOWCENT_REPRO_ENTRY_MAX)
-        if not (_time_ok and _entry_ok):
+        if not _time_ok:
             if self._noisy_log_enabled(f"mode-repro-skip:{asset}:{cid}", max(8.0, float(LOG_SKIP_EVERY_SEC))):
-                _why = []
-                if not _time_ok:
-                    _why.append("time")
-                if not _entry_ok:
-                    _why.append("entry")
                 print(
                     f"{Y}[MODE-SKIP]{RS} {asset} {duration}m "
                     f"score={int(score)} entry={float(regime_entry):.3f} "
                     f"outside repro-lowcent t=[{LOWCENT_REPRO_WINDOW_MIN_SEC:.0f},{LOWCENT_REPRO_WINDOW_MAX_SEC:.0f}]s "
                     f"e=[{LOWCENT_REPRO_ENTRY_MIN:.3f},{LOWCENT_REPRO_ENTRY_MAX:.3f}) "
-                    f"why={'+'.join(_why) or 'unknown'}"
+                    f"why=time"
                 )
             self._skip_tick("repro_lowcent_filter")
             return None
+        if not _entry_ok:
+            # In repro mode we always place a LIMIT in-band and let fill decide.
+            # This avoids skipping whole rounds just because the current ask is out of range.
+            clipped = max(float(LOWCENT_REPRO_ENTRY_MIN), min(float(regime_entry), float(LOWCENT_REPRO_ENTRY_MAX) - 1e-6))
+            if self._noisy_log_enabled(f"mode-repro-limit:{asset}:{cid}", max(8.0, float(LOG_SKIP_EVERY_SEC))):
+                print(
+                    f"{B}[MODE-LIMIT]{RS} {asset} {duration}m "
+                    f"entry_live={float(regime_entry):.3f} -> limit={clipped:.3f} "
+                    f"band=[{LOWCENT_REPRO_ENTRY_MIN:.3f},{LOWCENT_REPRO_ENTRY_MAX:.3f})"
+                )
+            regime_entry = float(clipped)
     elif REGIME_BUCKET_ONLY_ENABLED:
         _dur_ok = (duration == REGIME_BUCKET_ONLY_DURATION)
         # Optional score-band filter for best live bucket quality.
