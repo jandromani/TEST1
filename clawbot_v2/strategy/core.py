@@ -2023,7 +2023,7 @@ async def _score_market(self, m: dict) -> dict | None:
                     )
                 self._skip_tick("consistency_trail_weak")
                 return None
-    if LOW_CENT_ONLY_ON_EXISTING_POSITION and entry <= LOW_CENT_ENTRY_THRESHOLD:
+    if (not LOWCENT_REPRO_MODE) and LOW_CENT_ONLY_ON_EXISTING_POSITION and entry <= LOW_CENT_ENTRY_THRESHOLD:
         if not booster_eval:
             if self._noisy_log_enabled(f"skip-lowcent-new:{asset}:{cid}", LOG_SKIP_EVERY_SEC):
                 print(
@@ -2045,7 +2045,7 @@ async def _score_market(self, m: dict) -> dict | None:
                 )
             self._skip_tick("lowcent_not_leading")
             return None
-    elif (not booster_eval) and entry <= LOW_CENT_ENTRY_THRESHOLD:
+    elif (not LOWCENT_REPRO_MODE) and (not booster_eval) and entry <= LOW_CENT_ENTRY_THRESHOLD:
         # Allow low-cent first entries too, but only for very strong setups.
         lowcent_new_ok = (
             duration >= 15
