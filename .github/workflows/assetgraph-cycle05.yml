@@ -1,4 +1,4 @@
-name: AssetGraph Cycle 05 Lab
+name: AssetGraph Cycle 05B Strict Lab
 
 on:
   push:
@@ -8,7 +8,7 @@ on:
 jobs:
   benchmark:
     runs-on: ubuntu-latest
-    timeout-minutes: 35
+    timeout-minutes: 40
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-python@v5
@@ -18,14 +18,15 @@ jobs:
         run: |
           python -m pip install --upgrade pip
           pip install 'ultralytics>=8.3,<9' opencv-python-headless scipy numpy
-      - name: Run memory lift benchmark
-        id: memory
+      - name: Run multi-head memory benchmark
         continue-on-error: true
-        run: python .assetgraph-lab/memory_ci.py
-      - name: Run PETS RGB-to-world E2E benchmark
-        id: pets
+        run: python .assetgraph-lab/memory_v2_ci.py
+      - name: Run strict blind PETS E2E benchmark
         continue-on-error: true
-        run: python .assetgraph-lab/pets_e2e_ci.py
+        run: python .assetgraph-lab/pets_e2e_v2_ci.py
+      - name: Run AU-AIR sensor-aware benchmark
+        continue-on-error: true
+        run: python .assetgraph-lab/auair_ci.py
       - name: Write run summary
         if: always()
         run: |
@@ -36,15 +37,18 @@ jobs:
           for p in root.glob('*.json'):
               try:
                   d=json.loads(p.read_text())
-                  summary[p.name]={'pass_rule':d.get('pass_rule',d.get('result',{}).get('pass_rule')),'metrics':d.get('metrics',d.get('result',{}).get('metrics'))}
+                  summary[p.name]={
+                    'pass_rule':d.get('strict_pass_rule',d.get('component_pass',d.get('pass_rule',d.get('result',{}).get('pass_rule')))),
+                    'metrics':d.get('test_metrics',d.get('metrics',d.get('result',{}).get('metrics')))
+                  }
               except Exception as e: summary[p.name]={'error':str(e)}
-          (root/'cycle05_summary.json').write_text(json.dumps(summary,indent=2))
+          (root/'cycle05b_summary.json').write_text(json.dumps(summary,indent=2))
           print(json.dumps(summary,indent=2))
           PY
       - name: Upload AssetGraph evidence
         if: always()
         uses: actions/upload-artifact@v4
         with:
-          name: assetgraph-cycle05-evidence
+          name: assetgraph-cycle05b-evidence
           path: .assetgraph-lab/evidence
           if-no-files-found: warn
