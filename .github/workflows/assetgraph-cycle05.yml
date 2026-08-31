@@ -1,0 +1,50 @@
+name: AssetGraph Cycle 05 Lab
+
+on:
+  push:
+    branches: [assetgraph-cycle05-lab]
+  workflow_dispatch:
+
+jobs:
+  benchmark:
+    runs-on: ubuntu-latest
+    timeout-minutes: 35
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+      - name: Install benchmark dependencies
+        run: |
+          python -m pip install --upgrade pip
+          pip install 'ultralytics>=8.3,<9' opencv-python-headless scipy numpy
+      - name: Run memory lift benchmark
+        id: memory
+        continue-on-error: true
+        run: python .assetgraph-lab/memory_ci.py
+      - name: Run PETS RGB-to-world E2E benchmark
+        id: pets
+        continue-on-error: true
+        run: python .assetgraph-lab/pets_e2e_ci.py
+      - name: Write run summary
+        if: always()
+        run: |
+          python - <<'PY'
+          import json, pathlib
+          root=pathlib.Path('.assetgraph-lab/evidence')
+          summary={}
+          for p in root.glob('*.json'):
+              try:
+                  d=json.loads(p.read_text())
+                  summary[p.name]={'pass_rule':d.get('pass_rule',d.get('result',{}).get('pass_rule')),'metrics':d.get('metrics',d.get('result',{}).get('metrics'))}
+              except Exception as e: summary[p.name]={'error':str(e)}
+          (root/'cycle05_summary.json').write_text(json.dumps(summary,indent=2))
+          print(json.dumps(summary,indent=2))
+          PY
+      - name: Upload AssetGraph evidence
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: assetgraph-cycle05-evidence
+          path: .assetgraph-lab/evidence
+          if-no-files-found: warn
