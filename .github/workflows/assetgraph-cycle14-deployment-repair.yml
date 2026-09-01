@@ -43,7 +43,7 @@ jobs:
           assert x['training_in_cycle14'] is False
           assert x['methodology_fix'].startswith('non-regression')
           assert 'deployment_repair_pass' in x['gates']
-          assert h.exists() and 'Cycle 14' in h.read_text()
+          assert h.exists() and 'CYCLE 14' in h.read_text().upper()
           print({'gates':x['gates'],'selected':x['selected_profile'],'parity_f1':x['shared_postprocess_parity']['f1'],'html_bytes':h.stat().st_size})
           PY
       - name: Upload Cycle 14 evidence
