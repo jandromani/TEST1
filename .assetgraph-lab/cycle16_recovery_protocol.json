@@ -1,0 +1,69 @@
+{
+  "schema": "assetgraph-learning-protocol/small-rare-recovery-v1",
+  "cycle": 16,
+  "frozen_before_transset_h00_score": true,
+  "motivation": {
+    "cycle14_small_recall_test": 0.171875,
+    "cycle14_other_vehicle_spatial_recall_test": 0.5714285714285714,
+    "cycle14_pt_onnx_shared_postprocess_f1": 1.0,
+    "conclusion": "architecture-only inference repair is insufficient; next intervention must change learned representation while preserving deployment parity"
+  },
+  "data_policy": {
+    "training_sources": ["UAV-OBB train split only"],
+    "validation_sources": ["UAV-OBB valid split only"],
+    "frozen_internal_test": "UAV-OBB test split",
+    "external_holdout_for_promotion": "TRANSSET-H01",
+    "transset_h00_used_for_training": false,
+    "transset_h00_used_for_model_selection": false,
+    "transset_h01_used_for_training": false,
+    "transset_h01_used_for_model_selection": false
+  },
+  "starting_checkpoint": "exact Cycle 11 calibrated checkpoint",
+  "curriculum": {
+    "stage_1": {
+      "name": "focus-patch adaptation",
+      "source": "UAV-OBB train only",
+      "patch_rule": "deterministic object-centered crops generated only from train annotations; retain only OBBs whose four vertices remain inside crop",
+      "focus_targets": ["small objects by Cycle13 area threshold", "other_vehicle", "truck", "bike"],
+      "max_focus_patches": 768,
+      "epochs": 1,
+      "imgsz": 768,
+      "seed": 31
+    },
+    "stage_2": {
+      "name": "full-scene consolidation",
+      "source": "all published UAV-OBB train images",
+      "epochs": 1,
+      "imgsz": 768,
+      "seed": 31
+    }
+  },
+  "candidate_selection": {
+    "data": "UAV-OBB validation only",
+    "candidates": ["Cycle11 baseline", "Cycle16 curriculum checkpoint"],
+    "confidence": 0.30,
+    "match_iou": 0.30,
+    "score": "0.40*small_recall + 0.20*medium_recall + 0.20*other_vehicle_spatial_recall + 0.20*fine_f1",
+    "nonregression_constraint": "fine_f1 >= Cycle11 validation fine_f1 - 0.05"
+  },
+  "internal_promotion_gate": {
+    "small_recall_min": 0.30,
+    "other_vehicle_spatial_recall_min": 0.70,
+    "fine_f1_min": 0.56,
+    "coarse_vehicle_f1_min": 0.70,
+    "pt_onnx_shared_postprocess_f1_min": 0.98,
+    "all_required": true
+  },
+  "external_promotion_policy": {
+    "run_TRANSSET_H01_only_if_internal_gate_passes": true,
+    "H01_gate_identical_to_predeclared_H00_gate": true,
+    "never_reuse_H00_or_H01_for_selection": true
+  },
+  "license_policy": {
+    "current_ultralytics_path": "benchmark/research path; not commercial runtime unless separately licensed",
+    "parallel_commercial_runtime_candidates": [
+      "MMRotate / RTMDet-R (Apache-2.0)",
+      "Detectron2 rotated detection components (Apache-2.0)"
+    ]
+  }
+}
