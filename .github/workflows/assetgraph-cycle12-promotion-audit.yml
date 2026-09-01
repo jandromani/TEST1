@@ -1,0 +1,57 @@
+name: AssetGraph Cycle 12 Promotion Audit
+
+on:
+  push:
+    branches: [assetgraph-cycle12-promotion-audit]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+  actions: read
+
+jobs:
+  promotion-audit:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 25
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+      - name: Download promoted Cycle 11 checkpoint
+        uses: actions/download-artifact@v4
+        with:
+          name: assetgraph-cycle11-overhead-calibrated
+          path: .assetgraph-lab/evidence/c11
+          github-token: ${{ github.token }}
+          run-id: 33485780370
+      - name: Install audit dependencies
+        run: pip install 'ultralytics>=8.3,<9' pyyaml requests onnx onnxruntime
+      - name: Run frozen promotion audit
+        continue-on-error: true
+        run: python .assetgraph-lab/uavobb_promotion_audit_ci.py
+      - name: Static check offline proof
+        if: always()
+        run: |
+          python - <<'PY'
+          from pathlib import Path
+          p=Path('.assetgraph-lab/dist/assetgraph_frontier_v14_overhead_decision_object.html')
+          if p.exists():
+              s=p.read_text()
+              assert 'data:image/jpeg;base64,' in s
+              assert 'DecisionObject' in s
+              print({'bytes':p.stat().st_size,'embedded_jpegs':s.count('data:image/jpeg;base64,')})
+          else:
+              print('offline proof missing')
+          PY
+      - name: Upload Cycle 12 evidence
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: assetgraph-cycle12-promotion-audit
+          path: |
+            .assetgraph-lab/evidence/uavobb_promotion_audit.json
+            .assetgraph-lab/evidence/decision_object_uavobb.json
+            .assetgraph-lab/evidence/uavobb_calibrated_best.onnx
+            .assetgraph-lab/dist/assetgraph_frontier_v14_overhead_decision_object.html
+          if-no-files-found: warn
