@@ -1,0 +1,52 @@
+{
+  "schema": "assetgraph-dataset-registry/1.0",
+  "datasets": [
+    {
+      "id": "seadronessee",
+      "license": "CC0-1.0",
+      "roles": ["maritime_perception", "mot", "sar", "telemetry"],
+      "distribution": "remote archive + range-addressable micro-cubes",
+      "product_use": "ALLOWED",
+      "evidence_status": "VERIFIED"
+    },
+    {
+      "id": "uav-obb",
+      "license": "CC-BY-4.0",
+      "roles": ["overhead_obb_training", "internal_validation"],
+      "distribution": "remote ZIP, HTTP Range mapped",
+      "product_use": "ALLOWED_WITH_ATTRIBUTION",
+      "evidence_status": "VERIFIED"
+    },
+    {
+      "id": "transset",
+      "license": "CC-BY-4.0",
+      "roles": ["external_generalization_lockbox"],
+      "distribution": "remote ZIP, HTTP Range mapped",
+      "product_use": "ALLOWED_WITH_ATTRIBUTION",
+      "lockboxes": {
+        "H00": {"state": "CONSUMED_DIAGNOSTIC", "images": 128, "gt_boxes": 555},
+        "H01": {"state": "SEALED", "rule": "open only after a predeclared internal promotion pass"},
+        "H02": {"state": "SEALED"},
+        "H03": {"state": "SEALED"},
+        "H04": {"state": "SEALED"},
+        "H05": {"state": "SEALED"},
+        "H06": {"state": "SEALED"},
+        "H07": {"state": "SEALED"}
+      }
+    },
+    {
+      "id": "au-air",
+      "license": "CC-BY",
+      "roles": ["candidate_multi_domain_training", "uav_telemetry"],
+      "product_use": "CANDIDATE_PENDING_INTAKE_VERIFICATION",
+      "evidence_status": "NOT_YET_PROMOTED"
+    },
+    {
+      "id": "pets09-s2l1",
+      "license": "REVIEW_REQUIRED_FOR_REDISTRIBUTION",
+      "roles": ["rgb_world_benchmark"],
+      "product_use": "BENCHMARK_ONLY_UNTIL_LICENSE_REVIEW",
+      "evidence_status": "COMPONENT_E2E_PROVEN"
+    }
+  ]
+}
