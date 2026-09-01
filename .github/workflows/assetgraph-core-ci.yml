@@ -28,13 +28,15 @@ jobs:
         run: python -m compileall -q src
       - name: Run product-core tests
         run: pytest -q
-      - name: CLI smoke test
+      - name: CLI and registry smoke test
         run: |
           assetgraph status --json
           python - <<'PY'
           import json
           for p in ['registries/capabilities.json','registries/runtimes.json','registries/datasets.json']:
               x=json.load(open(p)); assert x.get('schema'); print(p, 'OK')
+          assert open('schemas/decision-object-v1.schema.json').read()
+          assert 'openapi: 3.1.0' in open('api/openapi.yaml').read()
           PY
       - name: Build wheel
         run: |
@@ -46,4 +48,6 @@ jobs:
           path: |
             assetgraph-core/dist/*
             assetgraph-core/registries/*.json
+            assetgraph-core/schemas/*
+            assetgraph-core/api/*
             assetgraph-core/README.md
