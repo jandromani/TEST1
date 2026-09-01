@@ -1,0 +1,114 @@
+openapi: 3.1.0
+info:
+  title: AssetGraph Persistent Asset Intelligence API
+  version: 1.0.0-alpha
+  description: Contract-first API for missions, observations, persistent assets, evidence-backed DecisionObjects and analyst review.
+servers:
+  - url: /api
+paths:
+  /v1/missions:
+    post:
+      operationId: createMission
+      summary: Create a mission contract
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: {$ref: '#/components/schemas/Mission'}
+      responses:
+        '201':
+          description: Mission accepted
+  /v1/missions/{mission_id}/observations:
+    post:
+      operationId: ingestObservation
+      summary: Ingest an evidence-bearing observation idempotently
+      parameters:
+        - in: path
+          name: mission_id
+          required: true
+          schema: {type: string}
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: {$ref: '#/components/schemas/Observation'}
+      responses:
+        '202':
+          description: Observation accepted or duplicate
+          content:
+            application/json:
+              schema: {$ref: '#/components/schemas/IngestReceipt'}
+  /v1/assets/{asset_id}:
+    get:
+      operationId: getAsset
+      summary: Get persistent asset state and observation history
+      parameters:
+        - in: path
+          name: asset_id
+          required: true
+          schema: {type: string}
+      responses:
+        '200': {description: Persistent asset}
+  /v1/decision-objects/{decision_object_id}:
+    get:
+      operationId: getDecisionObject
+      summary: Retrieve an evidence-backed DecisionObject
+      parameters:
+        - in: path
+          name: decision_object_id
+          required: true
+          schema: {type: string}
+      responses:
+        '200': {description: DecisionObject}
+  /v1/decision-objects/{decision_object_id}/reviews:
+    post:
+      operationId: reviewDecisionObject
+      summary: Append analyst review without deleting machine provenance
+      parameters:
+        - in: path
+          name: decision_object_id
+          required: true
+          schema: {type: string}
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: {$ref: '#/components/schemas/Review'}
+      responses:
+        '201': {description: Review recorded}
+components:
+  schemas:
+    Mission:
+      type: object
+      required: [mission_id, mission_type, acceptance_criteria]
+      properties:
+        mission_id: {type: string}
+        mission_type: {type: string}
+        aoi: {type: object, additionalProperties: true}
+        acceptance_criteria: {type: object, additionalProperties: true}
+        requested_outputs: {type: array, items: {type: string}}
+    Observation:
+      type: object
+      required: [observation_id, observed_at, source, sha256]
+      properties:
+        observation_id: {type: string}
+        observed_at: {type: string, format: date-time}
+        source: {type: object, additionalProperties: true}
+        sha256: {type: string, pattern: '^[a-f0-9]{64}$'}
+        geometry: {type: object, additionalProperties: true}
+        telemetry: {type: object, additionalProperties: true}
+    IngestReceipt:
+      type: object
+      required: [observation_id, status, idempotency_key]
+      properties:
+        observation_id: {type: string}
+        status: {enum: [accepted, duplicate, rejected]}
+        idempotency_key: {type: string}
+    Review:
+      type: object
+      required: [status, reviewed_at]
+      properties:
+        status: {enum: [validated, rejected, uncertain]}
+        reviewed_at: {type: string, format: date-time}
+        analyst_id: {type: [string, 'null']}
+        rationale: {type: [string, 'null']}
