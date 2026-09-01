@@ -1,0 +1,48 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://assetgraph.local/schemas/decision-object-v1.json",
+  "title": "AssetGraph DecisionObject v1",
+  "type": "object",
+  "required": ["schema", "decision_object_id", "mission", "provenance", "review"],
+  "properties": {
+    "schema": {"type": "string", "pattern": "^assetgraph/decision-object-v1$"},
+    "decision_object_id": {"type": "string", "minLength": 3},
+    "mission": {
+      "oneOf": [
+        {"type": "object", "required": ["type"], "properties": {"type": {"type": "string"}, "source": {"type": "string"}}, "additionalProperties": true},
+        {"type": "string", "minLength": 1}
+      ]
+    },
+    "assets": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "required": ["asset_hypothesis_id", "confidence"],
+        "properties": {
+          "asset_hypothesis_id": {"type": "string"},
+          "asset_class": {"type": "string"},
+          "state": {"type": "string"},
+          "subtype_hypothesis": {"type": ["string", "null"]},
+          "confidence": {"type": "number", "minimum": 0, "maximum": 1},
+          "subtype_confidence": {"type": ["number", "null"], "minimum": 0, "maximum": 1},
+          "observation_ids": {"type": "array", "items": {"type": "string"}}
+        },
+        "additionalProperties": true
+      }
+    },
+    "events": {"type": "array", "items": {"type": "object", "additionalProperties": true}},
+    "claims": {"type": "array", "items": {"type": "object", "additionalProperties": true}},
+    "provenance": {"type": "object", "minProperties": 1, "additionalProperties": true},
+    "review": {
+      "type": "object",
+      "required": ["status"],
+      "properties": {
+        "status": {"enum": ["machine_hypothesis", "validated", "rejected", "uncertain"]},
+        "analyst": {"type": ["string", "null"]}
+      },
+      "additionalProperties": true
+    }
+  },
+  "required": ["schema", "decision_object_id", "mission", "assets", "events", "claims", "provenance", "review"],
+  "additionalProperties": true
+}
