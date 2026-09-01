@@ -1,0 +1,31 @@
+name: AssetGraph Cycle 07 Discovery
+
+on:
+  push:
+    branches: [assetgraph-cycle07-lab]
+  workflow_dispatch:
+
+jobs:
+  discovery:
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+      - name: Install lightweight discovery dependencies
+        run: pip install remotezip
+      - name: Map SeaDronesSee remote ZIP
+        continue-on-error: true
+        run: python .assetgraph-lab/seadronessee_zip_map_ci.py
+      - name: Probe Mendeley UAV-OBB acquisition
+        continue-on-error: true
+        run: python .assetgraph-lab/mendeley_uavobb_probe_ci.py
+      - name: Upload discovery evidence
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: assetgraph-cycle07-discovery
+          path: .assetgraph-lab/evidence
+          if-no-files-found: warn
