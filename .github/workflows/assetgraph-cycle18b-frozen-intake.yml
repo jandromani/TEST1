@@ -8,7 +8,9 @@ on:
       - '.assetgraph-lab/cycle18b_sources.json'
       - '.assetgraph-lab/cycle18b_contract_gate.py'
       - '.assetgraph-lab/cycle18b_source_probe.py'
+      - '.assetgraph-lab/cycle18b_source_probe_v2.py'
       - '.assetgraph-lab/cycle18b_freeze_dataset.py'
+      - '.assetgraph-lab/cycle18b_hit_freeze.py'
       - '.github/workflows/assetgraph-cycle18b-frozen-intake.yml'
   workflow_dispatch:
 
@@ -40,13 +42,13 @@ jobs:
       - uses: actions/setup-python@v5
         with:
           python-version: '3.11'
-      - name: Resolve public immutable source routes without changing pinned versions
-        run: python .assetgraph-lab/cycle18b_source_probe.py
+      - name: Resolve exact public source routes and official redirecters
+        run: python .assetgraph-lab/cycle18b_source_probe_v2.py
       - uses: actions/upload-artifact@v4
         if: always()
         with:
-          name: assetgraph-cycle18b-source-probe
-          path: .assetgraph-lab/evidence/cycle18b/source_probe.json
+          name: assetgraph-cycle18b-source-probe-v2
+          path: .assetgraph-lab/evidence/cycle18b/source_probe_v2.json
 
   byte-freeze:
     needs: [contract, source-probe]
@@ -64,7 +66,12 @@ jobs:
         with:
           python-version: '3.11'
       - name: Freeze exact source bytes or emit explicit blocker
-        run: python .assetgraph-lab/cycle18b_freeze_dataset.py '${{ matrix.dataset }}'
+        run: |
+          if [ '${{ matrix.dataset }}' = 'hit-uav-main-6692596' ]; then
+            python .assetgraph-lab/cycle18b_hit_freeze.py
+          else
+            python .assetgraph-lab/cycle18b_freeze_dataset.py '${{ matrix.dataset }}'
+          fi
       - name: Assert Cycle 18B boundary
         if: always()
         run: |
@@ -89,7 +96,8 @@ jobs:
                   'member_manifest_sha256': x['member_manifest_sha256'],
                   'member_count': x['audit']['member_count'],
                   'image_members': x['audit']['image_count'],
-                  'unique_primary_image_hashes': x['audit']['unique_primary_image_hashes'],
+                  'canonical_layouts': x['audit'].get('hit_canonical_layouts'),
+                  'outlier_layouts': x['audit'].get('hit_outlier_layouts'),
                   'gates': x['gates'],
               })
           PY
@@ -108,7 +116,6 @@ jobs:
         run: |
           echo 'Cycle 18B is an intake/freeze cycle, not a training cycle.'
           echo 'A BLOCKED dataset is not a PASS and does not authorize training.'
-          echo 'SeaDronesSee OD v2 remains blocked until the exact official asset is pinned.'
           echo 'UAV-OBB remains pinned to Mendeley Version 1; no silent upgrade to v4 is permitted.'
           echo 'TRANSSET-H01 and TRANSSET-UAVOBB remain SEALED.'
           echo 'No model selection or external score is authorized by this workflow.'
