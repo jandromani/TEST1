@@ -1,0 +1,56 @@
+name: AssetGraph Cycle 14 Deployment Repair
+
+on:
+  push:
+    branches: [assetgraph-cycle14-deployment-repair]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+  actions: read
+
+jobs:
+  repair:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 45
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+      - name: Download exact Cycle 11 checkpoint
+        uses: actions/download-artifact@v4
+        with:
+          name: assetgraph-cycle11-overhead-calibrated
+          path: .assetgraph-lab/evidence/c11
+          github-token: ${{ github.token }}
+          run-id: 33485780370
+      - name: Install repair dependencies
+        run: pip install 'ultralytics>=8.3,<9' pyyaml requests onnx onnxruntime
+      - name: Run tiled + hierarchy + shared-postprocess repair
+        run: python .assetgraph-lab/uavobb_deployment_repair_ci.py
+      - name: Validate evidence contract
+        run: |
+          python - <<'PY'
+          import json
+          from pathlib import Path
+          e=Path('.assetgraph-lab/evidence/uavobb_deployment_repair.json')
+          d=Path('.assetgraph-lab/evidence/decision_object_cycle14.json')
+          h=Path('.assetgraph-lab/dist/assetgraph_frontier_v16_deployment_repair.html')
+          x=json.loads(e.read_text()); y=json.loads(d.read_text())
+          assert x['schema']=='assetgraph-evidence/uavobb-deployment-repair-v1'
+          assert y['schema']=='assetgraph-decision-object/0.2'
+          assert x['training_in_cycle14'] is False
+          assert 'deployment_repair_pass' in x['gates']
+          assert h.exists() and 'Cycle 14' in h.read_text()
+          print({'gates':x['gates'],'selected':x['selected_profile'],'parity_f1':x['shared_postprocess_parity']['f1'],'html_bytes':h.stat().st_size})
+          PY
+      - name: Upload Cycle 14 evidence
+        uses: actions/upload-artifact@v4
+        with:
+          name: assetgraph-cycle14-deployment-repair
+          path: |
+            .assetgraph-lab/evidence/uavobb_deployment_repair.json
+            .assetgraph-lab/evidence/decision_object_cycle14.json
+            .assetgraph-lab/evidence/uavobb_deployment_repair.onnx
+            .assetgraph-lab/dist/assetgraph_frontier_v16_deployment_repair.html
