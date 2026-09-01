@@ -3,7 +3,7 @@ from __future__ import annotations
 from dataclasses import dataclass, field, asdict
 from datetime import datetime, timezone
 from enum import Enum
-from typing import Any, Mapping, Sequence
+from typing import Any, Mapping
 
 
 def utc_now_iso() -> str:
@@ -60,7 +60,7 @@ class Observation:
             raise ValueError("confidence must be in [0, 1]")
         if self.subtype_confidence is not None and not 0.0 <= self.subtype_confidence <= 1.0:
             raise ValueError("subtype_confidence must be in [0, 1]")
-        if len(self.sha256) != 64:
+        if len(self.sha256) != 64 or any(c not in "0123456789abcdefABCDEF" for c in self.sha256):
             raise ValueError("sha256 must be a 64-character hex digest")
 
 
@@ -88,7 +88,12 @@ class AssetHypothesis:
         self.identity_confidence = identity_confidence
         self.first_seen = self.first_seen or observation.observed_at
         self.last_seen = observation.observed_at
-        self.state = AssetState.OBSERVED if self.state == AssetState.UNKNOWN else AssetState.ACTIVE
+        if self.state == AssetState.UNKNOWN:
+            self.state = AssetState.OBSERVED
+        elif self.state in {AssetState.OBSERVED, AssetState.ACTIVE}:
+            self.state = AssetState.ACTIVE
+        # MOVED / REACQUIRED are meaningful current states produced by the temporal
+        # engine and must not be erased simply because the observation is attached.
         if observation.subtype_hypothesis:
             self.subtype_hypothesis = observation.subtype_hypothesis
             self.subtype_confidence = observation.subtype_confidence
@@ -132,10 +137,7 @@ class DecisionObject:
 
     def to_dict(self) -> dict[str, Any]:
         payload = asdict(self)
-        payload["review"] = {
-            "status": self.review_status.value,
-            "analyst": self.analyst_id,
-        }
+        payload["review"] = {"status": self.review_status.value, "analyst": self.analyst_id}
         payload.pop("review_status", None)
         payload.pop("analyst_id", None)
         payload["mission"] = {"mission_id": self.mission_id, "type": "asset_intelligence"}
