@@ -88,6 +88,7 @@ jobs:
           print({'final_detections':x['final_detections'],'parity':{k:v for k,v in x['parity'].items() if k!='pairs'},'gates':x['gates']})
           PY
       - uses: actions/upload-artifact@v4
+        if: always()
         with:
           name: assetgraph-cycle17c-apache-final-detections
           path: |
