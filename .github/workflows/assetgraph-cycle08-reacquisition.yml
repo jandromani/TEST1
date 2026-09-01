@@ -1,0 +1,45 @@
+name: AssetGraph Cycle 08 Reacquisition
+
+on:
+  push:
+    branches: [assetgraph-cycle08-reacquisition]
+  workflow_dispatch:
+
+jobs:
+  reacquisition:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 35
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+      - name: Install benchmark dependencies
+        run: pip install 'ultralytics>=8.3,<9' scipy numpy pillow remotezip huggingface_hub requests
+      - name: Run real person loss and reacquisition gate
+        run: python .assetgraph-lab/seadronessee_person_reacq_ci.py
+      - name: Probe UAV-OBB public Google Drive files
+        continue-on-error: true
+        run: python .assetgraph-lab/uavobb_gdrive_probe_ci.py
+      - name: Static check generated offline HTML
+        run: |
+          python - <<'PY'
+          from pathlib import Path
+          p=Path('.assetgraph-lab/dist/assetgraph_frontier_v12_sar_reacquisition.html')
+          s=p.read_text()
+          assert '<!doctype html>' in s.lower()
+          assert 'data:image/jpeg;base64,' in s
+          assert 'Loss → reacquisition → alert → evidence' in s
+          assert 'SeaDronesSee' in s
+          print({'bytes':p.stat().st_size,'embedded_jpegs':s.count('data:image/jpeg;base64,')})
+          PY
+      - name: Upload Cycle 08 evidence and offline demo
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: assetgraph-cycle08-reacquisition
+          path: |
+            .assetgraph-lab/evidence/seadronessee_person_reacquisition.json
+            .assetgraph-lab/evidence/uavobb_google_drive_probe.json
+            .assetgraph-lab/dist/assetgraph_frontier_v12_sar_reacquisition.html
+          if-no-files-found: warn
