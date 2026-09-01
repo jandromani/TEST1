@@ -7,6 +7,7 @@ on:
       - '.assetgraph-lab/cycle18b_frozen_intake_protocol.json'
       - '.assetgraph-lab/cycle18b_sources.json'
       - '.assetgraph-lab/cycle18b_contract_gate.py'
+      - '.assetgraph-lab/cycle18b_source_probe.py'
       - '.assetgraph-lab/cycle18b_freeze_dataset.py'
       - '.github/workflows/assetgraph-cycle18b-frozen-intake.yml'
   workflow_dispatch:
@@ -30,8 +31,25 @@ jobs:
           name: assetgraph-cycle18b-contract
           path: .assetgraph-lab/evidence/cycle18b/contract_gate.json
 
-  byte-freeze:
+  source-probe:
     needs: contract
+    runs-on: ubuntu-24.04
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+      - name: Resolve public immutable source routes without changing pinned versions
+        run: python .assetgraph-lab/cycle18b_source_probe.py
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: assetgraph-cycle18b-source-probe
+          path: .assetgraph-lab/evidence/cycle18b/source_probe.json
+
+  byte-freeze:
+    needs: [contract, source-probe]
     strategy:
       fail-fast: false
       matrix:
@@ -45,41 +63,52 @@ jobs:
       - uses: actions/setup-python@v5
         with:
           python-version: '3.11'
-      - name: Freeze exact source bytes and member manifest
+      - name: Freeze exact source bytes or emit explicit blocker
         run: python .assetgraph-lab/cycle18b_freeze_dataset.py '${{ matrix.dataset }}'
-      - name: Assert training remains impossible in Cycle 18B
+      - name: Assert Cycle 18B boundary
+        if: always()
         run: |
           python - <<'PY'
           import json, pathlib
           dataset = '${{ matrix.dataset }}'
           p = pathlib.Path('.assetgraph-lab/evidence/cycle18b') / f'{dataset}.json'
+          assert p.exists(), f'missing evidence for {dataset}'
           x = json.load(open(p))
           assert x['training_allowed'] is False
           assert x['external_gates_accessed'] is False
-          assert x['gates']['byte_freeze_pass'] is True
-          print({
-              'dataset': dataset,
-              'archive_sha256': x['download']['sha256'],
-              'archive_bytes': x['download']['bytes'],
-              'member_manifest_sha256': x['member_manifest_sha256'],
-              'member_count': x['audit']['member_count'],
-              'image_count': x['audit']['image_count'],
-              'gates': x['gates'],
-          })
+          if x['status'] == 'BLOCKED':
+              assert dataset == 'uav-obb-mendeley-v1'
+              print({'dataset': dataset, 'status': 'BLOCKED', 'reason': x['reason']})
+          else:
+              assert x['gates']['byte_freeze_pass'] is True
+              print({
+                  'dataset': dataset,
+                  'status': x['status'],
+                  'archive_sha256': x['download']['sha256'],
+                  'archive_bytes': x['download']['bytes'],
+                  'member_manifest_sha256': x['member_manifest_sha256'],
+                  'member_count': x['audit']['member_count'],
+                  'image_members': x['audit']['image_count'],
+                  'unique_primary_image_hashes': x['audit']['unique_primary_image_hashes'],
+                  'gates': x['gates'],
+              })
           PY
       - uses: actions/upload-artifact@v4
+        if: always()
         with:
           name: assetgraph-cycle18b-${{ matrix.dataset }}
           path: .assetgraph-lab/evidence/cycle18b/${{ matrix.dataset }}.json
 
   boundary-summary:
     if: always()
-    needs: [contract, byte-freeze]
+    needs: [contract, source-probe, byte-freeze]
     runs-on: ubuntu-24.04
     steps:
       - name: Preserve the scientific boundary
         run: |
           echo 'Cycle 18B is an intake/freeze cycle, not a training cycle.'
+          echo 'A BLOCKED dataset is not a PASS and does not authorize training.'
           echo 'SeaDronesSee OD v2 remains blocked until the exact official asset is pinned.'
+          echo 'UAV-OBB remains pinned to Mendeley Version 1; no silent upgrade to v4 is permitted.'
           echo 'TRANSSET-H01 and TRANSSET-UAVOBB remain SEALED.'
           echo 'No model selection or external score is authorized by this workflow.'

@@ -1,5 +1,5 @@
 {
-  "schema": "assetgraph-perception-registry/frozen-acquisition-sources-v1",
+  "schema": "assetgraph-perception-registry/frozen-acquisition-sources-v2",
   "cycle": "18B",
   "observed_at": "2026-09-01",
   "sources": [
@@ -11,10 +11,11 @@
       "version": 1,
       "doi": "10.17632/6snrjwcpkh.1",
       "landing_uri": "https://data.mendeley.com/datasets/6snrjwcpkh/1",
-      "acquisition_uris": [
+      "oauth_api_uris": [
         "https://api.data.mendeley.com/datasets/6snrjwcpkh/zip/file_downloaded?version=1",
         "https://api.mendeley.com/datasets/6snrjwcpkh/zip/file_downloaded?version=1"
       ],
+      "oauth_observation": "Both dataset ZIP endpoints returned HTTP 401 from a clean GitHub Actions runner on 2026-09-01. C18B will discover a public immutable file route if one is exposed by the landing page; otherwise acquisition remains blocked rather than silently upgrading to v4.",
       "license_expected": "CC-BY-4.0",
       "attribution_required": true,
       "declared": {
@@ -24,7 +25,7 @@
         "resolution": "1920x1080",
         "classes": ["bike", "bus", "car", "other_vehicle", "taxi", "truck"]
       },
-      "state": "READY_FOR_BYTE_FREEZE"
+      "state": "BLOCKED_PENDING_PUBLIC_V1_FILE_RESOLUTION_OR_AUTH"
     },
     {
       "id": "hit-uav-main-6692596",
@@ -39,19 +40,40 @@
         "name": "HIT-UAV.zip",
         "size_bytes_from_github_metadata": 812468971,
         "uri": "https://github.com/suojiashun/HIT-UAV-Infrared-Thermal-Dataset/releases/download/v1.2.1/HIT-UAV.zip",
-        "release_license_expected": "CC0-1.0"
+        "release_license_expected": "CC0-1.0",
+        "license_asset": {
+          "asset_id": 95304183,
+          "name": "LICENSE",
+          "size_bytes_from_github_metadata": 7048,
+          "uri": "https://github.com/suojiashun/HIT-UAV-Infrared-Thermal-Dataset/releases/download/v1.2.1/LICENSE",
+          "expected_marker": "CC0 1.0 Universal"
+        },
+        "citation_asset": {
+          "asset_id": 95304179,
+          "name": "CITATION.cff",
+          "size_bytes_from_github_metadata": 342,
+          "uri": "https://github.com/suojiashun/HIT-UAV-Infrared-Thermal-Dataset/releases/download/v1.2.1/CITATION.cff"
+        }
+      },
+      "first_byte_freeze_observation": {
+        "archive_sha256": "335416598c7debdb4316179b57aadcc4a5928a315a9d88cdb0f32f6d20622960",
+        "archive_bytes": 812468971,
+        "member_count": 17441,
+        "image_members": 11598,
+        "member_manifest_sha256": "edcbe5b782a4c82e2b2578c215a4bc33afc019ce8a1f84c1205ac83227c36c71",
+        "interpretation": "The release repeats the logical image corpus across packaging/annotation layouts and may include documentation/sample images. C18B must identify equivalent 2898-image groups by content hash instead of equating ZIP image-member count with logical image count."
       },
       "snapshot_reconciliation": {
         "required": true,
         "reason": "the C18A pinned annotation commit carries CC-BY-4.0 while release v1.2.1 carries CC0; the acquired release must be treated as its own immutable payload and its bundled annotations must not be silently mixed with another snapshot",
-        "acceptance": "archive must contain its own license evidence and internally coherent image/annotation payload; any cross-snapshot merge requires explicit member equivalence evidence"
+        "acceptance": "release payload and release license are frozen together; all 2898-image candidate groups must have equivalent content-hash sets before one canonical group is selected; any external annotation merge requires explicit member equivalence evidence"
       },
       "declared": {
         "images": 2898,
         "source_video_frames": 43470,
         "classes": ["Person", "Bicycle", "Car", "OtherVehicle"]
       },
-      "state": "READY_FOR_BYTE_FREEZE_WITH_SNAPSHOT_RECONCILIATION"
+      "state": "READY_FOR_BYTE_FREEZE_WITH_RELEASE_RECONCILIATION"
     },
     {
       "id": "seadronessee-main-8062b5d",
