@@ -1,0 +1,43 @@
+name: AssetGraph Identity Runtime v1
+
+on:
+  push:
+    branches:
+      - assetgraph-cycle18b-frozen-intake
+    paths:
+      - 'identity_runtime/**'
+      - '.github/workflows/assetgraph-identity-runtime-v1.yml'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  identity-runtime-contract:
+    runs-on: ubuntu-22.04
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+      - name: Syntax
+        run: python -m py_compile identity_runtime/assetgraph_identity_runtime.py identity_runtime/test_identity_runtime.py
+      - name: Unit and contract tests
+        working-directory: identity_runtime
+        run: python -m unittest -v test_identity_runtime.py
+      - name: Smoke decision object
+        working-directory: identity_runtime
+        run: |
+          python - <<'PY'
+          import json
+          from assetgraph_identity_runtime import *
+          p=IdentityPolicy(confirm_min_score=.90,confirm_min_margin=.08,candidate_min_score=.65,new_max_score=.40,calibration_ref='ci-smoke')
+          o=Observation(observation_id='smoke',timestamp='2026-09-01T00:00:00Z',class_name='swimmer',appearance_embedding=[1,0],evidence_refs=['sha256:frame'])
+          ms=[AssetMemory(asset_id='asset-a',class_name='swimmer',appearance_embedding=[1,0],evidence_refs=['sha256:a']),AssetMemory(asset_id='asset-b',class_name='swimmer',appearance_embedding=[0,1],evidence_refs=['sha256:b'])]
+          d=IdentityResolver(p).resolve(o,ms).to_dict()
+          assert d['decision']=='CONFIRMED' and d['resolved_asset_id']=='asset-a'
+          assert d['decision_fingerprint'] and d['observation_fingerprint']
+          print(json.dumps(d,indent=2))
+          PY
