@@ -21,11 +21,11 @@ jobs:
         run: python .assetgraph-lab/seadronessee_zip_map_ci.py
       - name: Probe Mendeley UAV-OBB acquisition
         continue-on-error: true
-        run: python .assetgraph-lab/mendeley_uavobb_probe_ci.py
+        run: python .assetgraph-lab/mendeley_uavobb_probe_v2_ci.py
       - name: Upload discovery evidence
         if: always()
         uses: actions/upload-artifact@v4
         with:
-          name: assetgraph-cycle07-discovery
+          name: assetgraph-cycle07-discovery-v2
           path: .assetgraph-lab/evidence
           if-no-files-found: warn
