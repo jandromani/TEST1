@@ -1,0 +1,62 @@
+{
+  "schema": "assetgraph-runtime-protocol/apache-final-detection-parity-v1",
+  "cycle": "17C",
+  "goal": "prove or falsify one shared AssetGraph decoder/postprocess path from native RTMDet-R and ONNX Runtime tensors to final canonical RawDetection records",
+  "source": {
+    "repository": "open-mmlab/mmrotate",
+    "commit": "3ff004eb21ea040455b5585db229edba4037f1bf",
+    "license_expected": "Apache-2.0"
+  },
+  "model": {
+    "name": "rotated_rtmdet_tiny-3x-dota",
+    "checkpoint_sha256_expected": "9d821076f9d3f9bbe5a709524e6b0cf907ad58a7fb92615321f351cd389e51a3",
+    "c17b_onnx_sha256_expected": "5336b5a5a54bfcdfca4e0dde3dc3710498da7f5885de18237c40c7f405808699",
+    "c17b_run_id": 33500503780,
+    "c17b_artifact": "assetgraph-cycle17b-apache-raw-onnx"
+  },
+  "input": {
+    "source": "official MMRotate demo image",
+    "shape": [1, 3, 1024, 1024],
+    "preprocess": "BGR resize to 1024x1024 then frozen mean/std normalization"
+  },
+  "shared_adapter": {
+    "boundary": "nine raw RTMDet-R tensors to AssetGraph canonical RawDetection records",
+    "decoder": "MMRotate RotatedRTMDetHead.predict_by_feat at the frozen source commit",
+    "postprocess": {
+      "score_threshold": 0.05,
+      "nms_pre": 2000,
+      "nms_type": "nms_rotated",
+      "nms_iou_threshold": 0.1,
+      "max_per_image": 2000
+    },
+    "canonical_geometry": "oriented_box/cx_cy_width_height_angle_rad/le90"
+  },
+  "parity_gate": {
+    "final_detection_count_exact": true,
+    "per_class_count_exact": true,
+    "match_iou_floor": 0.85,
+    "matched_precision_min": 1.0,
+    "matched_recall_min": 1.0,
+    "matched_rotated_iou_min": 0.999,
+    "score_abs_diff_max": 0.0001,
+    "center_abs_delta_px_max": 0.02,
+    "size_abs_delta_px_max": 0.02,
+    "angle_abs_delta_rad_max": 0.0001,
+    "onnx_repeat_digest_exact": true,
+    "all_required": true
+  },
+  "anti_leakage": {
+    "transset_access": false,
+    "uavobb_access": false,
+    "domain_accuracy_scoring": false,
+    "gate_defined_before_run": true
+  },
+  "non_goals": [
+    "no DOTA weights promoted as product perception weights",
+    "no claim of UAV-OBB or TRANSSET accuracy",
+    "no training or model selection",
+    "no dynamic-shape or tiled-inference claim",
+    "no claim that MMRotate postprocess is the final lightweight production implementation"
+  ],
+  "next_if_pass": "promote the canonical detection contract and Apache ONNX adapter boundary into AssetGraph Core, then start lawful multi-domain intake/training without opening TRANSSET-H01"
+}

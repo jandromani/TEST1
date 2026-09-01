@@ -1,0 +1,97 @@
+name: AssetGraph Cycle 17C Apache Final Detection Parity
+
+on:
+  push:
+    branches: [assetgraph-cycle17c-apache-postprocess]
+    paths:
+      - '.assetgraph-lab/cycle17c_apache_postprocess_protocol.json'
+      - '.assetgraph-lab/rtmdet_r_postprocess_adapter.py'
+      - '.assetgraph-lab/apache_rtmdet_postprocess_parity_ci.py'
+      - '.github/workflows/assetgraph-cycle17c-apache-postprocess.yml'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+  actions: read
+
+jobs:
+  parity:
+    runs-on: ubuntu-22.04
+    timeout-minutes: 50
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.10'
+      - name: Verify frozen Cycle 17C protocol
+        run: |
+          python - <<'PY'
+          import hashlib, json
+          p='.assetgraph-lab/cycle17c_apache_postprocess_protocol.json'; b=open(p,'rb').read(); x=json.loads(b)
+          assert x['source']['commit']=='3ff004eb21ea040455b5585db229edba4037f1bf'
+          assert x['model']['c17b_onnx_sha256_expected']=='5336b5a5a54bfcdfca4e0dde3dc3710498da7f5885de18237c40c7f405808699'
+          assert x['parity_gate']['matched_precision_min']==1.0
+          assert x['parity_gate']['matched_recall_min']==1.0
+          assert x['anti_leakage']['transset_access'] is False
+          assert x['anti_leakage']['uavobb_access'] is False
+          print({'protocol_sha256':hashlib.sha256(b).hexdigest(),'gate':x['parity_gate']})
+          PY
+      - name: Download immutable Cycle 17B ONNX artifact
+        uses: actions/download-artifact@v4
+        with:
+          name: assetgraph-cycle17b-apache-raw-onnx
+          path: .assetgraph-lab/evidence/c17b
+          github-token: ${{ github.token }}
+          run-id: 33500503780
+      - name: Verify Cycle 17B transport hash
+        run: echo '5336b5a5a54bfcdfca4e0dde3dc3710498da7f5885de18237c40c7f405808699  .assetgraph-lab/evidence/c17b/rtmdet_r_tiny_raw_1024.onnx' | sha256sum -c -
+      - name: Install frozen Apache and ONNX runtime envelope
+        run: |
+          python -m pip install --upgrade 'pip<26' wheel setuptools
+          printf 'numpy==1.26.4\nopencv-python-headless==4.10.0.84\n' >/tmp/c17c-constraints.txt
+          pip install -c /tmp/c17c-constraints.txt numpy==1.26.4 opencv-python-headless==4.10.0.84
+          pip install -c /tmp/c17c-constraints.txt torch==2.0.1 torchvision==0.15.2 --index-url https://download.pytorch.org/whl/cpu
+          pip install -c /tmp/c17c-constraints.txt mmengine==0.10.7 mmdet==3.2.0
+          pip install -c /tmp/c17c-constraints.txt mmcv==2.1.0 -f https://download.openmmlab.com/mmcv/dist/cpu/torch2.0/index.html
+          pip install -c /tmp/c17c-constraints.txt onnxruntime==1.18.1
+      - name: Checkout exact Apache MMRotate source
+        run: |
+          git clone --filter=blob:none https://github.com/open-mmlab/mmrotate.git /tmp/mmrotate17c
+          git -C /tmp/mmrotate17c checkout --detach 3ff004eb21ea040455b5585db229edba4037f1bf
+          test "$(git -C /tmp/mmrotate17c rev-parse HEAD)" = '3ff004eb21ea040455b5585db229edba4037f1bf'
+          grep -q 'Apache License' /tmp/mmrotate17c/LICENSE
+          pip install -c /tmp/c17c-constraints.txt -v -e /tmp/mmrotate17c
+      - name: Acquire exact checkpoint and official image
+        run: |
+          mkdir -p /tmp/assetgraph17c
+          curl -L --fail --retry 3 -o /tmp/assetgraph17c/rtmdet_tiny.pth https://download.openmmlab.com/mmrotate/v1.0/rotated_rtmdet/rotated_rtmdet_tiny-3x-dota/rotated_rtmdet_tiny-3x-dota-9d821076.pth
+          curl -L --fail --retry 3 -o /tmp/assetgraph17c/demo.jpg https://raw.githubusercontent.com/open-mmlab/mmrotate/3ff004eb21ea040455b5585db229edba4037f1bf/demo/demo.jpg
+          echo '9d821076f9d3f9bbe5a709524e6b0cf907ad58a7fb92615321f351cd389e51a3  /tmp/assetgraph17c/rtmdet_tiny.pth' | sha256sum -c -
+          test -s /tmp/assetgraph17c/demo.jpg
+      - name: Compare final canonical detections after shared decoder and NMS
+        env:
+          MMROTATE_DIR: /tmp/mmrotate17c
+          RTMDET_CKPT: /tmp/assetgraph17c/rtmdet_tiny.pth
+          RTMDET_IMAGE: /tmp/assetgraph17c/demo.jpg
+          C17B_ONNX: .assetgraph-lab/evidence/c17b/rtmdet_r_tiny_raw_1024.onnx
+        run: python .assetgraph-lab/apache_rtmdet_postprocess_parity_ci.py
+      - name: Validate Cycle 17C evidence contract
+        run: |
+          python - <<'PY'
+          import json
+          p='.assetgraph-lab/evidence/cycle17c_apache_final_detection_parity.json'; x=json.load(open(p))
+          assert x['schema']=='assetgraph-evidence/apache-final-detection-parity-v1'
+          assert x['postprocess_included'] is True and x['nms_included'] is True
+          assert x['transset_accessed'] is False and x['uavobb_accessed'] is False
+          assert x['training_performed'] is False
+          assert x['gates']['final_detection_parity_pass'] is True
+          print({'final_detections':x['final_detections'],'parity':{k:v for k,v in x['parity'].items() if k!='pairs'},'gates':x['gates']})
+          PY
+      - uses: actions/upload-artifact@v4
+        with:
+          name: assetgraph-cycle17c-apache-final-detections
+          path: |
+            .assetgraph-lab/evidence/cycle17c_apache_final_detection_parity.json
+            .assetgraph-lab/evidence/cycle17c_pytorch_raw_detections.json
+            .assetgraph-lab/evidence/cycle17c_onnx_raw_detections.json
+            .assetgraph-lab/cycle17c_apache_postprocess_protocol.json
