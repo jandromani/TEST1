@@ -1,0 +1,48 @@
+{
+  "schema": "assetgraph-runtime-protocol/apache-rotated-detector-probe-v1",
+  "cycle": 17,
+  "goal": "prove or falsify a commercially permissive rotated-detector runtime path before training or migration",
+  "candidate": {
+    "project": "OpenMMLab MMRotate",
+    "source_commit": "3ff004eb21ea040455b5585db229edba4037f1bf",
+    "source_branch": "dev-1.x",
+    "license_expected": "Apache-2.0",
+    "model": "rotated_rtmdet_tiny-3x-dota",
+    "config": "configs/rotated_rtmdet/rotated_rtmdet_tiny-3x-dota.py",
+    "checkpoint_url": "https://download.openmmlab.com/mmrotate/v1.0/rotated_rtmdet/rotated_rtmdet_tiny-3x-dota/rotated_rtmdet_tiny-3x-dota-9d821076.pth",
+    "official_reported_dota_map": 75.60
+  },
+  "environment": {
+    "python": "3.10",
+    "torch": "2.0.1+cpu",
+    "torchvision": "0.15.2+cpu",
+    "mmcv": "2.1.0",
+    "mmdet": "3.2.0",
+    "mmengine": "0.10.7",
+    "device": "cpu"
+  },
+  "probe_stages": [
+    "verify exact source commit and Apache license",
+    "install exact compatibility envelope",
+    "import mmrotate and register modules",
+    "load official RTMDet-R Tiny DOTA checkpoint",
+    "run real inference on MMRotate official demo image",
+    "serialize native prediction geometry and version hashes"
+  ],
+  "gate": {
+    "source_commit_exact": true,
+    "apache_license_detected": true,
+    "dependency_imports_pass": true,
+    "checkpoint_load_pass": true,
+    "cpu_inference_pass": true,
+    "at_least_one_prediction_score_ge_0_30": true,
+    "all_required": true
+  },
+  "non_goals": [
+    "no UAV-OBB training",
+    "no TRANSSET access",
+    "no accuracy comparison with Cycle 11 yet",
+    "no claim of ONNX deployability until a separate export probe passes"
+  ],
+  "commercial_policy": "Promotion requires permissive source/model licensing to remain documented and a later ONNX/runtime parity gate to pass."
+}
