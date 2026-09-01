@@ -31,7 +31,7 @@ jobs:
           p = '.assetgraph-lab/evidence/cycle18a_lawful_intake.json'
           x = json.load(open(p))
           assert x['schema'] == 'assetgraph-evidence/lawful-multidomain-intake-v1'
-          assert x['download_queue'] == ['hit-uav-main-6692596', 'uav-obb-mendeley-v1']
+          assert x['download_queue'] == ['hit-uav-main-6692596', 'seadronessee-main-8062b5d', 'uav-obb-mendeley-v1']
           assert x['training_queue'] == []
           assert x['h01_accessed'] is False
           assert x['transset_uavobb_accessed'] is False

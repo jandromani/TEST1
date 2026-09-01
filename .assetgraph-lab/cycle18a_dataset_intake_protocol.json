@@ -46,11 +46,12 @@
       "uav-obb-mendeley-v1",
       "hit-uav-main-6692596",
       "au-air-2019-license-conflict",
-      "seadronessee-license-unresolved"
+      "seadronessee-main-8062b5d"
     ],
     "expected_download_queue": [
       "uav-obb-mendeley-v1",
-      "hit-uav-main-6692596"
+      "hit-uav-main-6692596",
+      "seadronessee-main-8062b5d"
     ],
     "expected_training_queue": [],
     "quarantined_candidates_must_not_leak": true,

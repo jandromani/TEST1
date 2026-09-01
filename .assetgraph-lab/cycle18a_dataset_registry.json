@@ -148,30 +148,50 @@
       "release_condition": "obtain a rights-holder clarification or original immutable license artifact that resolves both embedded noncommercial entries and the public CC-BY claim"
     },
     {
-      "id": "seadronessee-license-unresolved",
+      "id": "seadronessee-main-8062b5d",
       "name": "SeaDronesSee",
       "domain": "RGB maritime UAV object detection and tracking",
       "source": {
-        "canonical_uri": "https://seadronessee.cs.uni-tuebingen.de/",
-        "version_pinned": false
+        "canonical_uri": "https://github.com/Ben93kie/SeaDronesSee",
+        "benchmark_uri": "https://seadronessee.cs.uni-tuebingen.de/",
+        "commit": "8062b5df484bfeab7ebb8c039ca535dee05b6d8e",
+        "version_pinned": true
       },
       "license": {
-        "id": "UNKNOWN",
-        "commercial_policy_eligible": false,
+        "id": "CC0-1.0",
+        "commercial_policy_eligible": true,
+        "canonical_uri": "https://creativecommons.org/publicdomain/zero/1.0/",
         "evidence": {
-          "kind": "official dataset page describes tracks and sizes but exposes no license grant in the inspected page",
-          "uri": "https://seadronessee.cs.uni-tuebingen.de/",
-          "sha256": null,
-          "observed_value": "no license grant resolved"
+          "kind": "official benchmark repository README at pinned source commit",
+          "uri": "https://raw.githubusercontent.com/Ben93kie/SeaDronesSee/8062b5df484bfeab7ebb8c039ca535dee05b6d8e/README.md",
+          "sha256": "7bea947a62ae70f7cd364c6f26b716dd7587a7336ca71b916b88b8f26f114500",
+          "observed_value": "dataset is Creative Commons CC0 1.0 Universal"
         },
-        "attribution_required": null
+        "attribution_required": false,
+        "attribution_policy": "credit the benchmark by project convention even though CC0 does not require attribution"
       },
-      "status": "QUARANTINED_LICENSE_UNRESOLVED",
+      "declared_content": {
+        "object_detection_v2_train_images": 8930,
+        "object_detection_v2_validation_images": 1547,
+        "multi_object_tracking_clips": 22,
+        "multi_object_tracking_frames": 54105,
+        "modalities": [
+          "RGB maritime UAV",
+          "tracking telemetry"
+        ]
+      },
+      "status": "ELIGIBLE_FOR_VERIFIED_DOWNLOAD",
       "approval": {
-        "download": false,
+        "download": true,
         "training": false
       },
-      "release_condition": "pin an exact dataset version and obtain authoritative terms that explicitly cover the intended commercial training and distribution workflow"
+      "remaining_before_training": [
+        "select and pin the exact OD/MOT release assets rather than the mutable benchmark umbrella",
+        "freeze archive SHA-256 and member manifest",
+        "verify mirror bytes against the official release and review third-party elements",
+        "freeze sequence-aware splits and near-duplicate groups",
+        "emit benchmark citation record"
+      ]
     }
   ]
 }

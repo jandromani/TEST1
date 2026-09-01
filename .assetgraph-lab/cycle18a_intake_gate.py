@@ -58,7 +58,10 @@ def main() -> None:
     download_licenses_allowed = all(
         row["license"]["id"] in allowed
         and row["license"]["commercial_policy_eligible"] is True
-        and row["license"].get("attribution_required") is True
+        and (
+            row["license"]["id"] == "CC0-1.0"
+            or row["license"].get("attribution_required") is True
+        )
         for row in candidates
         if row["approval"]["download"]
     )
