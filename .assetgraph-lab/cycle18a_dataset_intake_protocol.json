@@ -1,0 +1,67 @@
+{
+  "schema": "assetgraph-perception-protocol/lawful-multidomain-intake-v1",
+  "cycle": "18A",
+  "goal": "admit only versioned datasets with pinned provenance and a commercially eligible license into the Cycle 18 acquisition queue",
+  "policy": {
+    "allowed_license_ids": [
+      "Apache-2.0",
+      "CC-BY-4.0",
+      "CC0-1.0"
+    ],
+    "quarantine_markers": [
+      "NONCOMMERCIAL",
+      "NO-DERIVATIVES",
+      "UNKNOWN",
+      "CONFLICTING"
+    ],
+    "download_requires": [
+      "canonical source URI",
+      "version or source commit",
+      "pinned license evidence",
+      "attribution plan",
+      "dataset-specific rights review"
+    ],
+    "training_requires_after_download": [
+      "archive SHA-256",
+      "member manifest",
+      "split and leakage audit",
+      "annotation and class-map validation",
+      "privacy and sensitive-imagery review"
+    ],
+    "legal_scope": "engineering admission policy only; it is not legal advice or a warranty of rights"
+  },
+  "seals": {
+    "TRANSSET-H01": "SEALED",
+    "TRANSSET-UAVOBB": "SEALED",
+    "external_test_scoring": false
+  },
+  "execution": {
+    "dataset_bytes_downloaded": false,
+    "training_performed": false,
+    "model_selected": false,
+    "network_required_by_gate": false
+  },
+  "gate": {
+    "required_candidate_ids": [
+      "uav-obb-mendeley-v1",
+      "hit-uav-main-6692596",
+      "au-air-2019-license-conflict",
+      "seadronessee-license-unresolved"
+    ],
+    "expected_download_queue": [
+      "uav-obb-mendeley-v1",
+      "hit-uav-main-6692596"
+    ],
+    "expected_training_queue": [],
+    "quarantined_candidates_must_not_leak": true,
+    "all_required": true
+  },
+  "non_goals": [
+    "no dataset corpus download in Cycle 18A",
+    "no training, validation or model selection",
+    "no product-accuracy claim",
+    "no opening of either frozen external gate",
+    "no assumption that a webpage label supersedes conflicting embedded metadata"
+  ],
+  "next_if_pass": "Cycle 18B downloads only the approved queue, freezes archive/member hashes and performs leakage, annotation, privacy and taxonomy audits before any training job can exist"
+}

@@ -1,0 +1,177 @@
+{
+  "schema": "assetgraph-perception-registry/dataset-intake-v1",
+  "observed_at": "2026-09-01T00:00:00Z",
+  "legal_disclaimer": "These are evidence-backed engineering admission decisions, not legal advice or a warranty of third-party rights.",
+  "candidates": [
+    {
+      "id": "uav-obb-mendeley-v1",
+      "name": "UAV-OBB",
+      "domain": "RGB nadir urban traffic with oriented boxes",
+      "source": {
+        "canonical_uri": "https://data.mendeley.com/datasets/6snrjwcpkh/1",
+        "doi": "10.17632/6snrjwcpkh.1",
+        "version": 1,
+        "version_pinned": true,
+        "observed_page_sha256": "86ed2bfc5500c4c0d50c0380b12f54b314abfb22e52c5fc79f83e6be837fb107"
+      },
+      "license": {
+        "id": "CC-BY-4.0",
+        "commercial_policy_eligible": true,
+        "canonical_uri": "https://creativecommons.org/licenses/by/4.0/",
+        "evidence": {
+          "kind": "publisher JSON-LD and dataset metadata",
+          "uri": "https://data.mendeley.com/datasets/6snrjwcpkh/1",
+          "sha256": "86ed2bfc5500c4c0d50c0380b12f54b314abfb22e52c5fc79f83e6be837fb107",
+          "observed_value": "CC BY 4.0"
+        },
+        "attribution_required": true
+      },
+      "declared_content": {
+        "images": 1375,
+        "instances": 35615,
+        "classes": [
+          "bike",
+          "bus",
+          "car",
+          "other_vehicle",
+          "taxi",
+          "truck"
+        ],
+        "annotation_format": "YOLOv8-OBB four normalized vertices"
+      },
+      "canonical_class_map": {
+        "bike": "bicycle",
+        "bus": "heavy_vehicle",
+        "car": "light_vehicle",
+        "other_vehicle": "other_vehicle",
+        "taxi": "light_vehicle",
+        "truck": "heavy_vehicle"
+      },
+      "status": "ELIGIBLE_FOR_VERIFIED_DOWNLOAD",
+      "approval": {
+        "download": true,
+        "training": false
+      },
+      "remaining_before_training": [
+        "freeze archive SHA-256 and member manifest",
+        "verify the license applies to every archive member and third-party element",
+        "freeze train/validation/internal-test splits before inspection",
+        "audit geographic and near-duplicate leakage",
+        "emit attribution record"
+      ]
+    },
+    {
+      "id": "hit-uav-main-6692596",
+      "name": "HIT-UAV",
+      "domain": "infrared thermal UAV imagery with oriented and axis-aligned boxes",
+      "source": {
+        "canonical_uri": "https://github.com/suojiashun/HIT-UAV-Infrared-Thermal-Dataset",
+        "commit": "669259659b21a2737ca9f5e4bc81892acbe6ecd8",
+        "version_pinned": true
+      },
+      "license": {
+        "id": "CC-BY-4.0",
+        "commercial_policy_eligible": true,
+        "canonical_uri": "https://creativecommons.org/licenses/by/4.0/",
+        "evidence": {
+          "kind": "license file at pinned source commit",
+          "uri": "https://raw.githubusercontent.com/suojiashun/HIT-UAV-Infrared-Thermal-Dataset/669259659b21a2737ca9f5e4bc81892acbe6ecd8/LICENSE",
+          "sha256": "7e7170e3cebf88a9f60c7b8421418323c09304da1af4d5e90f4da1dc1c8a2661",
+          "observed_value": "CC BY 4.0"
+        },
+        "attribution_required": true
+      },
+      "declared_content": {
+        "images": 2898,
+        "source_video_frames": 43470,
+        "classes": [
+          "Person",
+          "Bicycle",
+          "Car",
+          "OtherVehicle"
+        ],
+        "annotation_formats": [
+          "oriented JSON/XML",
+          "axis-aligned JSON/XML"
+        ]
+      },
+      "canonical_class_map": {
+        "Person": "human",
+        "Bicycle": "bicycle",
+        "Car": "light_vehicle",
+        "OtherVehicle": "other_vehicle"
+      },
+      "status": "ELIGIBLE_FOR_VERIFIED_DOWNLOAD",
+      "approval": {
+        "download": true,
+        "training": false
+      },
+      "remaining_before_training": [
+        "freeze every acquired image and annotation hash",
+        "verify repository license coverage for image payloads and any third-party elements",
+        "freeze location-aware splits and near-duplicate groups",
+        "define thermal-to-model channel policy",
+        "emit attribution record"
+      ]
+    },
+    {
+      "id": "au-air-2019-license-conflict",
+      "name": "AU-AIR",
+      "domain": "RGB low-altitude traffic with UAV telemetry",
+      "source": {
+        "canonical_uri": "https://bozcani.github.io/auairdataset/",
+        "mirror_uri": "https://github.com/freeridering/auair-dataset",
+        "mirror_commit": "183ad75e68a6db696cd137b3c588f79c84d24c8c",
+        "version_pinned": true
+      },
+      "license": {
+        "id": "CONFLICTING",
+        "commercial_policy_eligible": false,
+        "public_index_claim": "CC-BY-4.0",
+        "embedded_annotation_claims": [
+          "CC-BY-NC-SA-2.0",
+          "CC-BY-NC-2.0"
+        ],
+        "evidence": {
+          "kind": "license array embedded in the mirrored 100-sample annotation JSON",
+          "uri": "https://raw.githubusercontent.com/freeridering/auair-dataset/183ad75e68a6db696cd137b3c588f79c84d24c8c/examples/auair_subset/annotations.json",
+          "sha256": "dadacf0c481f7e82721966d3ff4e469fe3d631258114908108c879f71becfb72",
+          "observed_value": "Attribution-NonCommercial-ShareAlike 2.0 and Attribution-NonCommercial 2.0"
+        },
+        "attribution_required": true
+      },
+      "status": "QUARANTINED_LICENSE_CONFLICT",
+      "approval": {
+        "download": false,
+        "training": false
+      },
+      "release_condition": "obtain a rights-holder clarification or original immutable license artifact that resolves both embedded noncommercial entries and the public CC-BY claim"
+    },
+    {
+      "id": "seadronessee-license-unresolved",
+      "name": "SeaDronesSee",
+      "domain": "RGB maritime UAV object detection and tracking",
+      "source": {
+        "canonical_uri": "https://seadronessee.cs.uni-tuebingen.de/",
+        "version_pinned": false
+      },
+      "license": {
+        "id": "UNKNOWN",
+        "commercial_policy_eligible": false,
+        "evidence": {
+          "kind": "official dataset page describes tracks and sizes but exposes no license grant in the inspected page",
+          "uri": "https://seadronessee.cs.uni-tuebingen.de/",
+          "sha256": null,
+          "observed_value": "no license grant resolved"
+        },
+        "attribution_required": null
+      },
+      "status": "QUARANTINED_LICENSE_UNRESOLVED",
+      "approval": {
+        "download": false,
+        "training": false
+      },
+      "release_condition": "pin an exact dataset version and obtain authoritative terms that explicitly cover the intended commercial training and distribution workflow"
+    }
+  ]
+}

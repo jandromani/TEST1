@@ -1,0 +1,50 @@
+name: AssetGraph Cycle 18A Lawful Multidomain Intake
+
+on:
+  push:
+    branches: [assetgraph-cycle18a-lawful-intake]
+    paths:
+      - '.assetgraph-lab/cycle18a_dataset_intake_protocol.json'
+      - '.assetgraph-lab/cycle18a_dataset_registry.json'
+      - '.assetgraph-lab/cycle18a_intake_gate.py'
+      - '.github/workflows/assetgraph-cycle18a-lawful-intake.yml'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  intake:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 5
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+      - name: Evaluate frozen offline intake policy
+        run: python .assetgraph-lab/cycle18a_intake_gate.py
+      - name: Verify Cycle 18A evidence boundary
+        run: |
+          python - <<'PY'
+          import json
+          p = '.assetgraph-lab/evidence/cycle18a_lawful_intake.json'
+          x = json.load(open(p))
+          assert x['schema'] == 'assetgraph-evidence/lawful-multidomain-intake-v1'
+          assert x['download_queue'] == ['hit-uav-main-6692596', 'uav-obb-mendeley-v1']
+          assert x['training_queue'] == []
+          assert x['h01_accessed'] is False
+          assert x['transset_uavobb_accessed'] is False
+          assert x['dataset_bytes_downloaded'] is False
+          assert x['training_performed'] is False
+          assert x['gates']['auair_license_conflict_explicit'] is True
+          assert x['gates']['cycle18a_intake_pass'] is True
+          print({'download_queue': x['download_queue'], 'gates': x['gates']})
+          PY
+      - uses: actions/upload-artifact@v4
+        with:
+          name: assetgraph-cycle18a-lawful-intake
+          path: |
+            .assetgraph-lab/cycle18a_dataset_intake_protocol.json
+            .assetgraph-lab/cycle18a_dataset_registry.json
+            .assetgraph-lab/evidence/cycle18a_lawful_intake.json
