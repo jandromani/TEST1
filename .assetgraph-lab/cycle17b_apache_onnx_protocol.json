@@ -1,0 +1,53 @@
+{
+  "schema": "assetgraph-runtime-protocol/apache-raw-onnx-parity-v1",
+  "cycle": "17B",
+  "goal": "prove or falsify transport of the Apache RTMDet-R network from native PyTorch/MMRotate to ONNX Runtime before any backend-specific postprocess",
+  "source": {
+    "repository": "open-mmlab/mmrotate",
+    "commit": "3ff004eb21ea040455b5585db229edba4037f1bf",
+    "license_expected": "Apache-2.0"
+  },
+  "model": {
+    "name": "rotated_rtmdet_tiny-3x-dota",
+    "config": "configs/rotated_rtmdet/rotated_rtmdet_tiny-3x-dota.py",
+    "checkpoint_url": "https://download.openmmlab.com/mmrotate/v1.0/rotated_rtmdet/rotated_rtmdet_tiny-3x-dota/rotated_rtmdet_tiny-3x-dota-9d821076.pth",
+    "checkpoint_sha256_expected": "081a74b2c84407347c7b62b45a8647c70a816452027aaf2e0d6cefae3a2b6e9d"
+  },
+  "input": {
+    "source": "official MMRotate demo image",
+    "shape": [1, 3, 1024, 1024],
+    "preprocess": "BGR resize to 1024x1024 then config mean/std normalization",
+    "mean_bgr": [103.53, 116.28, 123.675],
+    "std_bgr": [57.375, 57.12, 58.395]
+  },
+  "export": {
+    "opset": 17,
+    "dynamic_axes": false,
+    "boundary": "model.extract_feat -> model.bbox_head raw tensors",
+    "postprocess_included": false,
+    "nms_included": false
+  },
+  "parity_gate": {
+    "all_output_shapes_exact": true,
+    "cosine_min": 0.9999,
+    "mean_abs_diff_max": 0.0005,
+    "p99_abs_diff_max": 0.002,
+    "max_abs_diff_max": 0.02,
+    "onnx_checker_pass": true,
+    "onnxruntime_cpu_pass": true,
+    "all_required": true
+  },
+  "anti_leakage": {
+    "transset_access": false,
+    "uavobb_training": false,
+    "domain_accuracy_scoring": false,
+    "gate_defined_before_export": true
+  },
+  "non_goals": [
+    "no DOTA weights are promoted as product weights",
+    "no claim of UAV-OBB or TRANSSET accuracy",
+    "no backend-specific NMS parity claim",
+    "no dynamic-shape export claim"
+  ],
+  "next_if_pass": "implement one AssetGraph shared decoder/postprocess adapter and compare native versus ONNX final RawDetection objects"
+}
