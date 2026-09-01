@@ -1,0 +1,104 @@
+name: AssetGraph Cycle 15E TRANSSET External Score
+
+on:
+  push:
+    branches: [assetgraph-cycle15-transset-intake]
+    paths:
+      - '.github/workflows/assetgraph-cycle15e-transset-external-score.yml'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+  actions: read
+
+jobs:
+  external-score:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 60
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+
+      - name: Wait for exact Cycle 14 evidence run
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          python - <<'PY'
+          import json, os, time, urllib.request
+          run_id=33496085908
+          url=f'https://api.github.com/repos/jandromani/TEST1/actions/runs/{run_id}'
+          for _ in range(90):
+              req=urllib.request.Request(url,headers={'Authorization':f'Bearer {os.environ["GH_TOKEN"]}','Accept':'application/vnd.github+json'})
+              x=json.load(urllib.request.urlopen(req))
+              print({'cycle14_run':run_id,'status':x['status'],'conclusion':x.get('conclusion')},flush=True)
+              if x['status']=='completed':
+                  if x.get('conclusion')!='success': raise SystemExit('Exact Cycle 14 evidence publication run did not succeed')
+                  break
+              time.sleep(10)
+          else: raise SystemExit('Cycle 14 evidence run did not complete inside polling window')
+          PY
+
+      - name: Download exact Cycle 11 checkpoint
+        uses: actions/download-artifact@v4
+        with:
+          name: assetgraph-cycle11-overhead-calibrated
+          path: .assetgraph-lab/evidence/c11
+          github-token: ${{ github.token }}
+          run-id: 33485780370
+
+      - name: Download exact Cycle 14 evidence
+        uses: actions/download-artifact@v4
+        with:
+          name: assetgraph-cycle14-deployment-repair
+          path: .assetgraph-lab/c14_artifact
+          github-token: ${{ github.token }}
+          run-id: 33496085908
+
+      - name: Normalize Cycle 14 evidence path
+        run: |
+          mkdir -p .assetgraph-lab/evidence/c14
+          C14=$(find .assetgraph-lab/c14_artifact -name uavobb_deployment_repair.json -print -quit)
+          test -n "$C14"
+          cp "$C14" .assetgraph-lab/evidence/c14/uavobb_deployment_repair.json
+          python - <<'PY'
+          import json
+          x=json.load(open('.assetgraph-lab/evidence/c14/uavobb_deployment_repair.json'))
+          assert x['selected_profile']['name']=='single1024'
+          assert x['training_in_cycle14'] is False
+          print({'selected_profile':x['selected_profile'],'cycle14_gates':x['gates']})
+          PY
+
+      - name: Download frozen TRANSSET H00 lockbox
+        uses: actions/download-artifact@v4
+        with:
+          name: assetgraph-cycle15c-transset-lockbox
+          path: .assetgraph-lab/evidence/c15c
+          github-token: ${{ github.token }}
+          run-id: 33493906464
+
+      - name: Install scoring dependencies
+        run: pip install 'ultralytics>=8.3,<9' requests remotezip pillow
+
+      - name: Execute first and only H00 score
+        run: python .assetgraph-lab/transset_external_score_ci.py
+
+      - name: Validate score provenance
+        run: |
+          python - <<'PY'
+          import json
+          p='.assetgraph-lab/evidence/transset_external_score.json'
+          x=json.load(open(p))
+          assert x['schema']=='assetgraph-evidence/transset-external-score-v1'
+          assert x['lockbox']['selected_count']==128 and x['lockbox']['gt_boxes']==555
+          assert x['model']['cycle14_profile']['name']=='single1024'
+          assert x['anti_leakage']['transset_used_for_training'] is False
+          assert x['gates']['input_hashes_pass'] is True
+          print({'metrics':x['metrics'],'gates':x['gates']})
+          PY
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: assetgraph-cycle15e-transset-external-score-h00
+          path: .assetgraph-lab/evidence/transset_external_score.json
