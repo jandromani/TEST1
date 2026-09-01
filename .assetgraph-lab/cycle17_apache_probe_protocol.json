@@ -14,12 +14,22 @@
   },
   "environment": {
     "python": "3.10",
+    "numpy": "1.26.4",
     "torch": "2.0.1+cpu",
     "torchvision": "0.15.2+cpu",
     "mmcv": "2.1.0",
     "mmdet": "3.2.0",
     "mmengine": "0.10.7",
     "device": "cpu"
+  },
+  "compatibility_fix": {
+    "trigger": "first probe reached native inference but NumPy 2.2.6 was ABI-incompatible with the Torch 2.0.1/MMCV compiled stack",
+    "change": "pin NumPy to 1.26.4",
+    "model_changed": false,
+    "checkpoint_changed": false,
+    "input_image_changed": false,
+    "threshold_changed": false,
+    "gate_changed": false
   },
   "probe_stages": [
     "verify exact source commit and Apache license",
