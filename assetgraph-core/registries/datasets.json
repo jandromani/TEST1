@@ -4,18 +4,25 @@
     {
       "id": "seadronessee",
       "license": "CC0-1.0",
+      "source_commit": "8062b5df484bfeab7ebb8c039ca535dee05b6d8e",
+      "license_evidence_sha256": "7bea947a62ae70f7cd364c6f26b716dd7587a7336ca71b916b88b8f26f114500",
       "roles": ["maritime_perception", "mot", "sar", "telemetry"],
       "distribution": "remote archive + range-addressable micro-cubes",
       "product_use": "ALLOWED",
-      "evidence_status": "VERIFIED"
+      "evidence_status": "VERIFIED",
+      "cycle18_intake_status": "ELIGIBLE_FOR_VERIFIED_DOWNLOAD"
     },
     {
       "id": "uav-obb",
       "license": "CC-BY-4.0",
+      "source_doi": "10.17632/6snrjwcpkh.1",
+      "source_version": 1,
+      "license_evidence_sha256": "86ed2bfc5500c4c0d50c0380b12f54b314abfb22e52c5fc79f83e6be837fb107",
       "roles": ["overhead_obb_training", "internal_validation"],
       "distribution": "remote ZIP, HTTP Range mapped",
       "product_use": "ALLOWED_WITH_ATTRIBUTION",
-      "evidence_status": "VERIFIED"
+      "evidence_status": "VERIFIED",
+      "cycle18_intake_status": "ELIGIBLE_FOR_VERIFIED_DOWNLOAD"
     },
     {
       "id": "transset",
@@ -36,10 +43,26 @@
     },
     {
       "id": "au-air",
-      "license": "CC-BY",
+      "license": "CONFLICTING",
       "roles": ["candidate_multi_domain_training", "uav_telemetry"],
-      "product_use": "CANDIDATE_PENDING_INTAKE_VERIFICATION",
-      "evidence_status": "NOT_YET_PROMOTED"
+      "product_use": "QUARANTINED_LICENSE_CONFLICT",
+      "evidence_status": "CYCLE18A_QUARANTINED",
+      "public_index_claim": "CC-BY-4.0",
+      "embedded_annotation_claims": ["CC-BY-NC-SA-2.0", "CC-BY-NC-2.0"],
+      "annotation_evidence_sha256": "dadacf0c481f7e82721966d3ff4e469fe3d631258114908108c879f71becfb72",
+      "training_approved": false
+    },
+    {
+      "id": "hit-uav",
+      "license": "CC-BY-4.0",
+      "source_commit": "669259659b21a2737ca9f5e4bc81892acbe6ecd8",
+      "license_evidence_sha256": "7e7170e3cebf88a9f60c7b8421418323c09304da1af4d5e90f4da1dc1c8a2661",
+      "roles": ["thermal_uav_perception", "oriented_detection", "domain_generalization"],
+      "distribution": "pinned Git repository intake candidate",
+      "product_use": "DOWNLOAD_ONLY_PENDING_CORPUS_AUDIT",
+      "evidence_status": "LICENSE_VERIFIED_IN_CYCLE18A",
+      "cycle18_intake_status": "ELIGIBLE_FOR_VERIFIED_DOWNLOAD",
+      "training_approved": false
     },
     {
       "id": "pets09-s2l1",

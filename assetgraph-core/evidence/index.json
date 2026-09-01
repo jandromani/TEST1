@@ -47,6 +47,17 @@
       "artifact_expires_at": "2026-11-30T12:01:10Z",
       "claim": "201 of 201 final canonical detections match after one shared decoder and rotated NMS; minimum rotated IoU 0.9999894117359766",
       "measurement_note": "the first greedy global matcher was non-bijective in dense same-class clusters; model, ONNX, input, postprocess, NMS and frozen thresholds were unchanged"
+    },
+    {
+      "cycle": "18A",
+      "status": "PASS",
+      "workflow_run_id": 33507352424,
+      "head_sha": "206c33355c8d29f0a35c91b134df1c1ddd158308",
+      "artifact_id": 9800136308,
+      "artifact_name": "assetgraph-cycle18a-lawful-intake",
+      "artifact_sha256": "13adeb34aace6a6b5e0b511c28fa290ee5d9c2d83e3750c69a6f5d1de8f0452f",
+      "artifact_expires_at": "2026-11-30T12:22:51Z",
+      "claim": "UAV-OBB, HIT-UAV and SeaDronesSee entered the verified-download queue; training remained locked and AU-AIR was quarantined because embedded noncommercial license entries conflict with a public CC-BY claim"
     }
   ],
   "durability_gap": "GitHub Actions artifacts are retention-bound. Copy exact digest-verified artifacts into the first durable release before expiry."

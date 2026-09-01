@@ -42,13 +42,15 @@ Experimental Cycle code stays in the lab. A capability may enter this tree only 
 - Apache RTMDet-R native runtime probe: PASS.
 - Apache RTMDet-R raw PyTorch -> ONNX Runtime parity: PASS on all nine tensors.
 - Apache RTMDet-R final detection parity through one shared decoder and rotated NMS: PASS, 201/201 matched with minimum rotated IoU 0.999989.
+- Cycle 18A lawful multidomain intake: PASS. UAV-OBB, HIT-UAV and SeaDronesSee are admitted to verified acquisition; no dataset is yet admitted to the new training queue.
+- AU-AIR commercial intake: QUARANTINED because embedded noncommercial license entries conflict with the public CC-BY claim.
 
 The Apache path is now **transport validated**, not accuracy promoted. The official DOTA checkpoint remains evaluation-only; product weights, multidomain accuracy, dynamic shapes and tiled inference are still open gates.
 
 ## Next product gates
 
-1. Freeze the Cycle 18 lawful multi-domain intake and training protocol without touching external H01.
-2. Train product-candidate Apache RTMDet-R weights and pass internal multidomain gates.
+1. Cycle 18B: acquire only the approved queue; freeze archive/member hashes and complete leakage, annotation, privacy and taxonomy audits.
+2. Cycle 18C: train product-candidate Apache RTMDet-R weights and pass internal multidomain gates.
 3. Open H01 once only after that internal promotion pass.
 4. Replace the MMRotate-backed shared postprocess with a lightweight independently tested production implementation.
 5. Persistent identity service, temporal/event engine and measured Intelligence Memory.

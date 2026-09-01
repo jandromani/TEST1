@@ -30,7 +30,7 @@ def main(argv: list[str] | None = None) -> int:
         payload = {
             "product": "AssetGraph Core",
             "version": __version__,
-            "stage": "transport-validated-core",
+            "stage": "lawful-multidomain-intake",
             "principle": "evidence before promotion",
         }
         print(json.dumps(payload, indent=2) if args.as_json else f"AssetGraph Core {__version__} · {payload['stage']}")
