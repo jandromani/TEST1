@@ -1,0 +1,93 @@
+name: AssetGraph Console v4 Model Lab Runtime Safe
+
+on:
+  push:
+    branches:
+      - assetgraph-cycle18b-frozen-intake
+    paths:
+      - '.assetgraph-lab/build_intelligence_console_v4_model_lab_fixed2.py'
+      - '.github/workflows/assetgraph-console-v4-model-lab-fixed2.yml'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  build-model-lab:
+    runs-on: ubuntu-22.04
+    timeout-minutes: 70
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.10'
+      - name: Install system dependencies
+        run: |
+          sudo apt-get update -y
+          sudo apt-get install -y ffmpeg
+      - name: Install shared Python envelope
+        run: |
+          python -m pip install --upgrade 'pip<26' wheel setuptools
+          printf 'numpy==1.26.4\nopencv-python-headless==4.10.0.84\n' >/tmp/v4-constraints.txt
+          pip install -c /tmp/v4-constraints.txt numpy==1.26.4 opencv-python-headless==4.10.0.84 pillow scipy requests remotezip huggingface_hub==0.26.5 lapx>=0.5.2
+          pip install -c /tmp/v4-constraints.txt torch==2.0.1 torchvision==0.15.2 --index-url https://download.pytorch.org/whl/cpu
+          pip install -c /tmp/v4-constraints.txt ultralytics==8.3.40
+          pip install -c /tmp/v4-constraints.txt mmengine==0.10.7 mmdet==3.2.0
+          pip install -c /tmp/v4-constraints.txt mmcv==2.1.0 -f https://download.openmmlab.com/mmcv/dist/cpu/torch2.0/index.html
+      - name: Checkout exact Apache MMRotate source
+        run: |
+          git clone --filter=blob:none https://github.com/open-mmlab/mmrotate.git /tmp/mmrotate-v4
+          git -C /tmp/mmrotate-v4 checkout --detach 3ff004eb21ea040455b5585db229edba4037f1bf
+          test "$(git -C /tmp/mmrotate-v4 rev-parse HEAD)" = '3ff004eb21ea040455b5585db229edba4037f1bf'
+          grep -q 'Apache License' /tmp/mmrotate-v4/LICENSE
+          pip install -c /tmp/v4-constraints.txt -v -e /tmp/mmrotate-v4
+      - name: Acquire exact RTMDet-R checkpoint
+        run: |
+          mkdir -p /tmp/assetgraph-v4
+          curl -L --fail --retry 3 -o /tmp/assetgraph-v4/rtmdet_tiny.pth https://download.openmmlab.com/mmrotate/v1.0/rotated_rtmdet/rotated_rtmdet_tiny-3x-dota/rotated_rtmdet_tiny-3x-dota-9d821076.pth
+          echo '9d821076f9d3f9bbe5a709524e6b0cf907ad58a7fb92615321f351cd389e51a3  /tmp/assetgraph-v4/rtmdet_tiny.pth' | sha256sum -c -
+      - name: Build v4 real model lab
+        env:
+          MMROTATE_DIR: /tmp/mmrotate-v4
+          RTMDET_CKPT: /tmp/assetgraph-v4/rtmdet_tiny.pth
+        run: python .assetgraph-lab/build_intelligence_console_v4_model_lab_fixed2.py
+      - name: Validate v4 contract
+        run: |
+          test -s dist/ASSETGRAPH_INTELLIGENCE_CONSOLE_v4_MODEL_LAB.html
+          test -s dist/assetgraph_console_v4_manifest.json
+          python - <<'PY'
+          import json,re,subprocess,tempfile
+          from pathlib import Path
+          p=Path('dist/ASSETGRAPH_INTELLIGENCE_CONSOLE_v4_MODEL_LAB.html')
+          s=p.read_text(encoding='utf-8')
+          m=json.loads(Path('dist/assetgraph_console_v4_manifest.json').read_text())
+          assert 'MODEL LAB' in s
+          assert 'MODEL_PREDICTION_BENCHMARK' in s
+          assert 'RTMDET_R_OUT_OF_DOMAIN' in s
+          assert 'GT-386 RETRIEVAL' in s
+          assert 'gt_used_for_ranking' in s
+          assert 'setOverlayModeV4' in s
+          assert 'data-page="model"' in s
+          assert m['v4']['model_vs_gt'] is True
+          assert m['v4']['memory_retrieval']['gt_used_for_ranking'] is False
+          assert len(m['v4']['rtmdet_domain_stress']['frames']) == 9
+          total_model=sum(x['tp']+x['fp'] for x in m['v4']['sea_model']['missions'].values())
+          assert total_model > 0
+          scripts=re.findall(r'<script[^>]*>(.*?)</script>',s,re.S)
+          assert scripts
+          with tempfile.NamedTemporaryFile('w',suffix='.js',delete=False,encoding='utf-8') as f:
+              f.write('\n'.join(scripts)); jspath=f.name
+          subprocess.run(['node','--check',jspath],check=True)
+          print({'bytes':p.stat().st_size,'memory':m['v4']['memory_retrieval'],'sea':m['v4']['sea_model']['missions'],'rtmdet_frames':len(m['v4']['rtmdet_domain_stress']['frames']),'js':'PASS'})
+          PY
+      - name: Upload v4 artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: assetgraph-intelligence-console-v4-model-lab-runtime-safe
+          path: |
+            dist/ASSETGRAPH_INTELLIGENCE_CONSOLE_v4_MODEL_LAB.html
+            dist/assetgraph_console_v4_manifest.json
+          if-no-files-found: error
+          retention-days: 30
