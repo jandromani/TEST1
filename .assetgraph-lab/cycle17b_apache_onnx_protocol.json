@@ -11,7 +11,15 @@
     "name": "rotated_rtmdet_tiny-3x-dota",
     "config": "configs/rotated_rtmdet/rotated_rtmdet_tiny-3x-dota.py",
     "checkpoint_url": "https://download.openmmlab.com/mmrotate/v1.0/rotated_rtmdet/rotated_rtmdet_tiny-3x-dota/rotated_rtmdet_tiny-3x-dota-9d821076.pth",
-    "checkpoint_sha256_expected": "081a74b2c84407347c7b62b45a8647c70a816452027aaf2e0d6cefae3a2b6e9d"
+    "checkpoint_sha256_expected": "9d821076f9d3f9bbe5a709524e6b0cf907ad58a7fb92615321f351cd389e51a3",
+    "checkpoint_bytes_from_cycle17a": 48460132
+  },
+  "provenance_correction": {
+    "reason": "the first C17B run copied an incorrect checkpoint digest from an intermediate summary; Cycle17A immutable Evidence Pack is authoritative",
+    "export_attempted_before_correction": false,
+    "parity_gate_changed": false,
+    "model_changed": false,
+    "input_changed": false
   },
   "input": {
     "source": "official MMRotate demo image",
