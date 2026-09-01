@@ -1,0 +1,51 @@
+name: AssetGraph Cycle 09 Identity Memory
+
+on:
+  push:
+    branches: [assetgraph-cycle09-identity-memory]
+  workflow_dispatch:
+
+jobs:
+  identity-memory:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 35
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+      - name: Install identity benchmark dependencies
+        run: pip install 'ultralytics>=8.3,<9' scipy numpy pillow remotezip huggingface_hub
+      - name: Run frozen Identity Memory v1 on independent video
+        continue-on-error: true
+        run: python .assetgraph-lab/identity_memory_v1_ci.py
+      - name: Upload identity evidence
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: assetgraph-cycle09-identity-memory
+          path: .assetgraph-lab/evidence/identity_memory_v1_lockbox.json
+          if-no-files-found: warn
+
+  uavobb-intake:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+      - name: Install remote intake dependencies
+        run: pip install remotezip pillow requests
+      - name: Inspect UAV-OBB archive by HTTP Range
+        continue-on-error: true
+        run: python .assetgraph-lab/uavobb_remote_intake_ci.py
+      - name: Upload UAV-OBB intake evidence
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: assetgraph-cycle09-uavobb-intake
+          path: |
+            .assetgraph-lab/evidence/uavobb_remote_intake.json
+            .assetgraph-lab/assets/uavobb_intake
+          if-no-files-found: warn
