@@ -1,0 +1,32 @@
+name: AssetGraph Cycle 15A TRANSSET Intake
+on:
+  push:
+    branches: [assetgraph-cycle15-transset-intake]
+  workflow_dispatch:
+permissions:
+  contents: read
+jobs:
+  intake:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with: {python-version: '3.11'}
+      - run: pip install requests
+      - name: Probe public Figshare metadata and bytes
+        run: python .assetgraph-lab/transset_intake_ci.py
+      - name: Verify lockbox contract
+        run: |
+          python - <<'PY'
+          import json
+          x=json.load(open('.assetgraph-lab/evidence/transset_intake.json'))
+          assert x['schema']=='assetgraph-evidence/transset-intake-v1'
+          assert x['lockbox_policy']['training_allowed_before_first_score'] is False
+          assert x['total_files']>0
+          print({'intake_pass':x['intake_pass'],'files':x['total_files'],'bytes':x['total_bytes']})
+          PY
+      - uses: actions/upload-artifact@v4
+        with:
+          name: assetgraph-cycle15a-transset-intake
+          path: .assetgraph-lab/evidence/transset_intake.json
