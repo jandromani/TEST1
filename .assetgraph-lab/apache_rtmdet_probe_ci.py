@@ -30,13 +30,15 @@ def main():
     source_ok=source_commit==EXPECTED_COMMIT
     license_ok=('Apache License' in license_text and 'Version 2.0' in license_text)
 
+    import numpy as np
     import torch, torchvision, mmcv, mmdet, mmengine, mmrotate
     from mmdet.apis import inference_detector, init_detector
     from mmrotate.utils import register_all_modules
     versions={
-      'python':sys.version.split()[0], 'torch':torch.__version__, 'torchvision':torchvision.__version__,
+      'python':sys.version.split()[0], 'numpy':np.__version__, 'torch':torch.__version__, 'torchvision':torchvision.__version__,
       'mmcv':mmcv.__version__, 'mmdet':mmdet.__version__, 'mmengine':mmengine.__version__, 'mmrotate':mmrotate.__version__
     }
+    assert np.__version__=='1.26.4', versions
     register_all_modules()
     model=init_detector(str(CFG),str(CKPT),palette='dota',device='cpu')
     result=inference_detector(model,str(IMG))
@@ -60,6 +62,7 @@ def main():
     report={
       'schema':'assetgraph-evidence/apache-rtmdet-runtime-probe-v1',
       'protocol_sha256':sha256(PROTOCOL),
+      'compatibility_fix':protocol['compatibility_fix'],
       'source':{
         'repository':'open-mmlab/mmrotate','commit':source_commit,'expected_commit':EXPECTED_COMMIT,
         'license_file_sha256':sha256(MMR/'LICENSE'),'license_detected':'Apache-2.0' if license_ok else 'UNKNOWN'
