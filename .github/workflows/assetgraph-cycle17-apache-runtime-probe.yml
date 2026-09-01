@@ -1,0 +1,76 @@
+name: AssetGraph Cycle 17 Apache Runtime Probe
+
+on:
+  push:
+    branches: [assetgraph-cycle17-apache-runtime-probe]
+    paths:
+      - '.github/workflows/assetgraph-cycle17-apache-runtime-probe.yml'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  probe:
+    runs-on: ubuntu-22.04
+    timeout-minutes: 45
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.10'
+      - name: Verify protocol is predeclared
+        run: |
+          python - <<'PY'
+          import json,hashlib
+          p='.assetgraph-lab/cycle17_apache_probe_protocol.json';b=open(p,'rb').read();x=json.loads(b)
+          assert x['candidate']['source_commit']=='3ff004eb21ea040455b5585db229edba4037f1bf'
+          assert x['candidate']['license_expected']=='Apache-2.0'
+          assert 'no TRANSSET access' in x['non_goals']
+          print({'protocol_sha256':hashlib.sha256(b).hexdigest(),'candidate':x['candidate']})
+          PY
+      - name: Install pinned CPU foundation
+        run: |
+          python -m pip install --upgrade 'pip<26' wheel setuptools
+          pip install torch==2.0.1 torchvision==0.15.2 --index-url https://download.pytorch.org/whl/cpu
+          pip install mmengine==0.10.7 mmdet==3.2.0
+          pip install mmcv==2.1.0 -f https://download.openmmlab.com/mmcv/dist/cpu/torch2.0/index.html
+      - name: Checkout exact MMRotate source
+        run: |
+          git clone --filter=blob:none https://github.com/open-mmlab/mmrotate.git /tmp/mmrotate17
+          git -C /tmp/mmrotate17 checkout --detach 3ff004eb21ea040455b5585db229edba4037f1bf
+          test "$(git -C /tmp/mmrotate17 rev-parse HEAD)" = '3ff004eb21ea040455b5585db229edba4037f1bf'
+          grep -q 'Apache License' /tmp/mmrotate17/LICENSE
+          pip install -v -e /tmp/mmrotate17
+      - name: Acquire official RTMDet-R Tiny checkpoint and real demo image
+        run: |
+          mkdir -p /tmp/assetgraph17
+          curl -L --fail --retry 3 -o /tmp/assetgraph17/rtmdet_tiny.pth https://download.openmmlab.com/mmrotate/v1.0/rotated_rtmdet/rotated_rtmdet_tiny-3x-dota/rotated_rtmdet_tiny-3x-dota-9d821076.pth
+          curl -L --fail --retry 3 -o /tmp/assetgraph17/demo.jpg https://raw.githubusercontent.com/open-mmlab/mmrotate/3ff004eb21ea040455b5585db229edba4037f1bf/demo/demo.jpg
+          test -s /tmp/assetgraph17/rtmdet_tiny.pth
+          test -s /tmp/assetgraph17/demo.jpg
+          sha256sum /tmp/assetgraph17/rtmdet_tiny.pth /tmp/assetgraph17/demo.jpg
+      - name: Run native CPU compatibility probe
+        env:
+          MMROTATE_DIR: /tmp/mmrotate17
+          RTMDET_CKPT: /tmp/assetgraph17/rtmdet_tiny.pth
+          RTMDET_IMAGE: /tmp/assetgraph17/demo.jpg
+        run: python .assetgraph-lab/apache_rtmdet_probe_ci.py
+      - name: Validate evidence contract
+        run: |
+          python - <<'PY'
+          import json
+          p='.assetgraph-lab/evidence/cycle17_apache_rtmdet_probe.json';x=json.load(open(p))
+          assert x['schema']=='assetgraph-evidence/apache-rtmdet-runtime-probe-v1'
+          assert x['source']['commit']=='3ff004eb21ea040455b5585db229edba4037f1bf'
+          assert x['source']['license_detected']=='Apache-2.0'
+          assert x['transset_accessed'] is False
+          assert x['uavobb_training_performed'] is False
+          assert x['onnx_claim']=='NOT_TESTED'
+          assert x['gates']['apache_runtime_probe_pass'] is True
+          print({'gates':x['gates'],'versions':x['environment'],'inference':x['inference']})
+          PY
+      - uses: actions/upload-artifact@v4
+        with:
+          name: assetgraph-cycle17a-apache-rtmdet-runtime-probe
+          path: .assetgraph-lab/evidence/cycle17_apache_rtmdet_probe.json
