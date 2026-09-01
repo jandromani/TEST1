@@ -1,0 +1,68 @@
+name: AssetGraph Cycle 16 Small Rare Recovery
+
+on:
+  push:
+    branches: [assetgraph-cycle16-small-rare-recovery]
+    paths:
+      - '.github/workflows/assetgraph-cycle16-small-rare-recovery.yml'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+  actions: read
+
+jobs:
+  recover:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 120
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+      - name: Download exact Cycle 11 checkpoint
+        uses: actions/download-artifact@v4
+        with:
+          name: assetgraph-cycle11-overhead-calibrated
+          path: .assetgraph-lab/evidence/c11
+          github-token: ${{ github.token }}
+          run-id: 33485780370
+      - name: Install exact recovery runtime
+        run: pip install 'ultralytics==8.4.137' pyyaml requests onnx onnxruntime
+      - name: Verify precommitted learning protocol
+        run: |
+          python - <<'PY'
+          import hashlib,json
+          p='.assetgraph-lab/cycle16_recovery_protocol.json'
+          b=open(p,'rb').read();x=json.loads(b)
+          assert x['frozen_before_transset_h00_score'] is True
+          assert x['data_policy']['transset_h00_used_for_training'] is False
+          assert x['data_policy']['transset_h00_used_for_model_selection'] is False
+          print({'protocol_sha256':hashlib.sha256(b).hexdigest(),'cycle':x['cycle'],'external_next':x['external_promotion_policy']})
+          PY
+      - name: Train small and rare recovery curriculum
+        run: python .assetgraph-lab/uavobb_small_rare_recovery_ci.py
+      - name: Validate Cycle 16 evidence contract
+        run: |
+          python - <<'PY'
+          import json, pathlib
+          p=pathlib.Path('.assetgraph-lab/evidence/cycle16_recovery.json')
+          x=json.loads(p.read_text())
+          assert x['schema']=='assetgraph-evidence/uavobb-small-rare-recovery-v1'
+          assert x['transset_used_for_training'] is False
+          assert x['transset_used_for_selection'] is False
+          assert x['selection']['profile']['name']=='single1024'
+          assert x['external_next']=='TRANSSET-H01 only if internal_promotion_pass=true'
+          assert pathlib.Path('.assetgraph-lab/evidence/cycle16_candidate.pt').exists()
+          assert pathlib.Path('.assetgraph-lab/evidence/cycle16_selected_1024.onnx').exists()
+          print({'selected':x['selection']['selected'],'validation_scores':[x['selection']['baseline_score'],x['selection']['candidate_score']],'test_f1':x['frozen_test']['fine']['f1'],'small_recall':x['frozen_test']['size'].get('small',{}).get('recall'),'other_vehicle_spatial_recall':x['frozen_test']['other_vehicle_coarse']['recall'],'parity_f1':x['deployment']['parity']['f1'],'gates':x['gates']})
+          PY
+      - name: Upload Cycle 16 evidence
+        uses: actions/upload-artifact@v4
+        with:
+          name: assetgraph-cycle16-small-rare-recovery
+          path: |
+            .assetgraph-lab/evidence/cycle16_recovery.json
+            .assetgraph-lab/evidence/cycle16_candidate.pt
+            .assetgraph-lab/evidence/cycle16_selected_1024.onnx
+            .assetgraph-lab/cycle16_recovery_protocol.json
