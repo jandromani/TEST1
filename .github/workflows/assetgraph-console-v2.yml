@@ -6,6 +6,7 @@ on:
       - assetgraph-cycle18b-frozen-intake
     paths:
       - '.assetgraph-lab/build_intelligence_console_v2.py'
+      - '.assetgraph-lab/build_intelligence_console_v2_strict.py'
       - '.github/workflows/assetgraph-console-v2.yml'
   workflow_dispatch:
 
@@ -36,7 +37,7 @@ jobs:
           pip install pillow numpy requests remotezip
 
       - name: Build real-imagery standalone
-        run: python .assetgraph-lab/build_intelligence_console_v2.py
+        run: python .assetgraph-lab/build_intelligence_console_v2_strict.py
 
       - name: Validate standalone contract
         run: |
@@ -44,13 +45,19 @@ jobs:
           test -s dist/assetgraph_console_v2_manifest.json
           python - <<'PY'
           from pathlib import Path
+          import json
           p=Path('dist/ASSETGRAPH_INTELLIGENCE_CONSOLE_v2_REAL_IMAGERY.html')
           s=p.read_text(encoding='utf-8')
+          m=json.loads(Path('dist/assetgraph_console_v2_manifest.json').read_text())
           assert s.count('data:image/jpeg;base64,') >= 35
           assert 'GROUND_TRUTH' in s
           assert 'MOTION_ANALYTICS_EXPERIMENTAL' in s
           assert 'PRIOR OBSERVATION RECOVERED' in s
-          print({'bytes':p.stat().st_size,'embedded_jpegs':s.count('data:image/jpeg;base64,')})
+          a=m['seadronessee']['selected_windows']['identity_early']
+          b=m['seadronessee']['selected_windows']['identity_late']
+          gap=b['start']-a['start']
+          assert gap >= 120, f'identity windows overlap: gap={gap}'
+          print({'bytes':p.stat().st_size,'embedded_jpegs':s.count('data:image/jpeg;base64,'),'identity_video':a['video_id'],'identity_gap_frames':gap,'non_overlapping':gap>=120})
           PY
 
       - name: Upload console artifact
