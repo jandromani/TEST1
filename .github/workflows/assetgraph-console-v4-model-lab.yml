@@ -62,25 +62,31 @@ jobs:
 
       - name: Validate v4 contract
         run: |
-          test -s .assetgraph-lab/dist/ASSETGRAPH_INTELLIGENCE_CONSOLE_v4_MODEL_LAB.html
-          test -s .assetgraph-lab/dist/assetgraph_console_v4_manifest.json
+          test -s dist/ASSETGRAPH_INTELLIGENCE_CONSOLE_v4_MODEL_LAB.html
+          test -s dist/assetgraph_console_v4_manifest.json
           python - <<'PY'
-          import json
+          import json,re,subprocess,tempfile
           from pathlib import Path
-          p=Path('.assetgraph-lab/dist/ASSETGRAPH_INTELLIGENCE_CONSOLE_v4_MODEL_LAB.html')
+          p=Path('dist/ASSETGRAPH_INTELLIGENCE_CONSOLE_v4_MODEL_LAB.html')
           s=p.read_text(encoding='utf-8')
-          m=json.loads(Path('.assetgraph-lab/dist/assetgraph_console_v4_manifest.json').read_text())
+          m=json.loads(Path('dist/assetgraph_console_v4_manifest.json').read_text())
           assert 'MODEL LAB' in s
           assert 'MODEL_PREDICTION_BENCHMARK' in s
           assert 'RTMDET_R_OUT_OF_DOMAIN' in s
           assert 'GT-386 retrieval' in s
-          assert "gt_used_for_ranking" in s
+          assert 'gt_used_for_ranking' in s
           assert m['v4']['model_vs_gt'] is True
           assert m['v4']['memory_retrieval']['gt_used_for_ranking'] is False
           assert len(m['v4']['rtmdet_domain_stress']['frames']) == 9
           total_model=sum(x['tp']+x['fp'] for x in m['v4']['sea_model']['missions'].values())
           assert total_model > 0
-          print({'bytes':p.stat().st_size,'memory':m['v4']['memory_retrieval'],'sea':m['v4']['sea_model']['missions'],'rtmdet_frames':len(m['v4']['rtmdet_domain_stress']['frames'])})
+          scripts=re.findall(r'<script>(.*?)</script>',s,re.S)
+          assert scripts
+          js='\n'.join(scripts)
+          with tempfile.NamedTemporaryFile('w',suffix='.js',delete=False,encoding='utf-8') as f:
+              f.write(js); jspath=f.name
+          subprocess.run(['node','--check',jspath],check=True)
+          print({'bytes':p.stat().st_size,'memory':m['v4']['memory_retrieval'],'sea':m['v4']['sea_model']['missions'],'rtmdet_frames':len(m['v4']['rtmdet_domain_stress']['frames']),'js':'PASS'})
           PY
 
       - name: Upload v4 artifact
@@ -88,7 +94,7 @@ jobs:
         with:
           name: assetgraph-intelligence-console-v4-model-lab
           path: |
-            .assetgraph-lab/dist/ASSETGRAPH_INTELLIGENCE_CONSOLE_v4_MODEL_LAB.html
-            .assetgraph-lab/dist/assetgraph_console_v4_manifest.json
+            dist/ASSETGRAPH_INTELLIGENCE_CONSOLE_v4_MODEL_LAB.html
+            dist/assetgraph_console_v4_manifest.json
           if-no-files-found: error
           retention-days: 30
