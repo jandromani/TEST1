@@ -1,0 +1,33 @@
+name: AssetGraph Cycle 15C TRANSSET Lockbox Freeze
+on:
+  push:
+    branches: [assetgraph-cycle15-transset-intake]
+  workflow_dispatch:
+permissions:
+  contents: read
+jobs:
+  freeze:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with: {python-version: '3.11'}
+      - run: pip install requests remotezip
+      - name: Freeze 128 external items before model access
+        run: python .assetgraph-lab/transset_lockbox_freeze_ci.py
+      - name: Verify anti-cherrypick contract
+        run: |
+          python - <<'PY'
+          import json
+          x=json.load(open('.assetgraph-lab/evidence/transset_lockbox_128.json'))
+          s=x['selection']
+          assert x['lockbox_frozen'] and x['selected_count']==128
+          assert s['uses_image_content'] is False and s['uses_ground_truth'] is False and s['uses_model_output'] is False
+          assert x['post_freeze_ground_truth_summary']['total_boxes']>0
+          print({'selected':x['selected_count'],'boxes':x['post_freeze_ground_truth_summary']['total_boxes'],'classes':x['post_freeze_ground_truth_summary']['classes']})
+          PY
+      - uses: actions/upload-artifact@v4
+        with:
+          name: assetgraph-cycle15c-transset-lockbox
+          path: .assetgraph-lab/evidence/transset_lockbox_128.json
