@@ -8,7 +8,8 @@ from assetgraph.domain.models import AssetHypothesis, DecisionObject, Event, Obs
 @runtime_checkable
 class AssetGraphRepository(Protocol):
     def put_observation(self, observation: Observation) -> bool:
-        """Persist observation. Returns True if inserted, False if idempotent duplicate.""" ...
+        """Persist observation. Returns True if inserted, False if idempotent duplicate."""
+        ...
 
     def get_observation(self, observation_id: str) -> Observation | None: ...
 
