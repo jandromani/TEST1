@@ -1,0 +1,56 @@
+name: AssetGraph Cycle 16 Recovery Lint
+
+on:
+  push:
+    branches: [assetgraph-cycle16-small-rare-recovery]
+    paths:
+      - '.assetgraph-lab/uavobb_small_rare_recovery_ci.py'
+      - '.assetgraph-lab/cycle16_recovery_protocol.json'
+      - '.github/workflows/assetgraph-cycle16-lint.yml'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  lint:
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+      - name: Compile recovery implementation
+        run: python -m py_compile .assetgraph-lab/uavobb_small_rare_recovery_ci.py
+      - name: Validate frozen protocol
+        run: |
+          python - <<'PY'
+          import json
+          p='.assetgraph-lab/cycle16_recovery_protocol.json'
+          x=json.load(open(p))
+          assert x['schema']=='assetgraph-learning-protocol/small-rare-recovery-v1'
+          assert x['frozen_before_transset_h00_score'] is True
+          d=x['data_policy']
+          assert d['transset_h00_used_for_training'] is False
+          assert d['transset_h00_used_for_model_selection'] is False
+          assert d['transset_h01_used_for_training'] is False
+          assert d['transset_h01_used_for_model_selection'] is False
+          assert x['external_promotion_policy']['run_TRANSSET_H01_only_if_internal_gate_passes'] is True
+          g=x['internal_promotion_gate']
+          assert g['small_recall_min']==0.30
+          assert g['other_vehicle_spatial_recall_min']==0.70
+          assert g['pt_onnx_shared_postprocess_f1_min']==0.98
+          print({'cycle':x['cycle'],'curriculum':x['curriculum'],'gate':g})
+          PY
+      - name: Prove external corpus is absent from trainer
+        run: |
+          python - <<'PY'
+          from pathlib import Path
+          s=Path('.assetgraph-lab/uavobb_small_rare_recovery_ci.py').read_text()
+          forbidden=['figshare','TRANSSET_v2.zip','api.figshare.com','transset_external']
+          bad=[x for x in forbidden if x.lower() in s.lower()]
+          assert not bad, bad
+          assert "transset_used_for_training':False" in s
+          assert "transset_used_for_selection':False" in s
+          print({'external_data_references':bad,'trainer_is_internal_only':True})
+          PY
