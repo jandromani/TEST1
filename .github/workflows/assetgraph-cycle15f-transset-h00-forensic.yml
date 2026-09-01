@@ -1,0 +1,54 @@
+name: AssetGraph Cycle 15F TRANSSET H00 Forensic
+
+on:
+  push:
+    branches: [assetgraph-cycle15-transset-intake]
+    paths:
+      - '.github/workflows/assetgraph-cycle15f-transset-h00-forensic.yml'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+  actions: read
+
+jobs:
+  forensic:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+      - name: Download exact consumed H00 score
+        uses: actions/download-artifact@v4
+        with:
+          name: assetgraph-cycle15e-transset-external-score-h00
+          path: .assetgraph-lab/evidence/c15e
+          github-token: ${{ github.token }}
+          run-id: 33496300112
+      - name: Download exact frozen H00 lockbox
+        uses: actions/download-artifact@v4
+        with:
+          name: assetgraph-cycle15c-transset-lockbox
+          path: .assetgraph-lab/evidence/c15c
+          github-token: ${{ github.token }}
+          run-id: 33493906464
+      - name: Analyze existing evidence only
+        run: python .assetgraph-lab/transset_h00_forensic_ci.py
+      - name: Validate burned-holdout policy
+        run: |
+          python - <<'PY'
+          import json
+          x=json.load(open('.assetgraph-lab/evidence/transset_h00_forensic.json'))
+          assert x['status']=='CONSUMED_DIAGNOSTIC'
+          assert x['policy']['H00_may_never_be_used_again_as_external_promotion_holdout'] is True
+          assert x['policy']['no_reinference_performed'] is True
+          assert x['policy']['future_external_claims_require_H01_or_later'] is True
+          assert x['summary']['images']==128
+          print({'status':x['status'],'summary':x['summary'],'findings':x['findings']})
+          PY
+      - uses: actions/upload-artifact@v4
+        with:
+          name: assetgraph-cycle15f-transset-h00-forensic
+          path: .assetgraph-lab/evidence/transset_h00_forensic.json
