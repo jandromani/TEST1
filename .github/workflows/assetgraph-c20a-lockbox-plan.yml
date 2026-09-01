@@ -1,0 +1,50 @@
+name: AssetGraph C20A Multi-Video Lockbox Plan
+
+on:
+  push:
+    branches:
+      - assetgraph-cycle18b-frozen-intake
+    paths:
+      - '.assetgraph-lab/c20a_multivideo_lockbox_plan.py'
+      - '.github/workflows/assetgraph-c20a-lockbox-plan.yml'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  freeze-lockbox-plan:
+    runs-on: ubuntu-22.04
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+      - name: Install
+        run: pip install requests==2.32.5
+      - name: Build frozen plan
+        run: python .assetgraph-lab/c20a_multivideo_lockbox_plan.py
+      - name: Validate benchmark boundary
+        run: |
+          python - <<'PY'
+          import json
+          from pathlib import Path
+          p=json.loads(Path('dist/c20a_multivideo_lockbox_plan.json').read_text())
+          assert p['status']=='PLAN_FROZEN_BEFORE_MODEL_EVALUATION'
+          assert p['plan_sha256']
+          assert p['dev_video_count']>=3
+          assert p['lockbox_video_count']>=2
+          assert set(p['dev_video_ids']).isdisjoint(p['lockbox_video_ids'])
+          assert p['next_gate']['product_freeze_allowed'] is False
+          lock=[x for x in p['pairs'] if x['partition']=='LOCKBOX']
+          assert sum(x['shared_track_count'] for x in lock)>0
+          assert sum(x['absent_track_count'] for x in lock)>0
+          assert sum(x['new_track_count'] for x in lock)>0
+          print({'plan_sha256':p['plan_sha256'],'eligible':p['eligible_video_pairs'],'dev':p['dev_video_ids'],'lockbox':p['lockbox_video_ids'],'metadata':p['source']['metadata_fields_detected'],'lockbox_shared':sum(x['shared_track_count'] for x in lock),'lockbox_absent':sum(x['absent_track_count'] for x in lock),'lockbox_new':sum(x['new_track_count'] for x in lock)})
+          PY
+      - uses: actions/upload-artifact@v4
+        with:
+          name: assetgraph-c20a-multivideo-lockbox-plan
+          path: dist/c20a_multivideo_lockbox_plan.json
+          if-no-files-found: error
+          retention-days: 30
