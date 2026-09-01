@@ -1,0 +1,45 @@
+name: AssetGraph Cycle 15D TRANSSET Holdout Bank
+
+on:
+  push:
+    branches: [assetgraph-cycle15-transset-intake]
+    paths:
+      - '.assetgraph-lab/transset_holdout_bank_ci.py'
+      - '.github/workflows/assetgraph-cycle15d-transset-holdout-bank.yml'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  freeze-bank:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+      - name: Install remote ZIP dependencies
+        run: pip install requests remotezip
+      - name: Freeze eight content-blind holdout blocks
+        run: python .assetgraph-lab/transset_holdout_bank_ci.py
+      - name: Verify anti-leakage contract
+        run: |
+          python - <<'PY'
+          import json
+          p='.assetgraph-lab/evidence/transset_holdout_bank.json'
+          x=json.load(open(p))
+          s=x['selection']
+          assert x['schema']=='assetgraph-lockbox-bank/transset-v1'
+          assert x['frozen_before_first_external_score'] is True
+          assert len(x['blocks'])==8 and all(b['count']==128 for b in x['blocks'])
+          assert s['uses_image_content'] is False and s['uses_ground_truth'] is False
+          assert s['uses_model_output'] is False and s['uses_performance'] is False
+          assert not any('objects' in item or 'bbox' in item for b in x['blocks'] for item in b['items'])
+          print({'reserved':sum(b['count'] for b in x['blocks']),'first_block':x['blocks'][0]['block_id'],'last_block':x['blocks'][-1]['block_id']})
+          PY
+      - uses: actions/upload-artifact@v4
+        with:
+          name: assetgraph-cycle15d-transset-holdout-bank
+          path: .assetgraph-lab/evidence/transset_holdout_bank.json
