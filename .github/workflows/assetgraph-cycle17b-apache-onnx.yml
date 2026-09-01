@@ -27,11 +27,13 @@ jobs:
           import json, hashlib
           p='.assetgraph-lab/cycle17b_apache_onnx_protocol.json'; b=open(p,'rb').read(); x=json.loads(b)
           assert x['source']['commit']=='3ff004eb21ea040455b5585db229edba4037f1bf'
+          assert x['model']['checkpoint_sha256_expected']=='9d821076f9d3f9bbe5a709524e6b0cf907ad58a7fb92615321f351cd389e51a3'
+          assert x['provenance_correction']['export_attempted_before_correction'] is False
           assert x['parity_gate']['cosine_min']==0.9999
           assert x['parity_gate']['p99_abs_diff_max']==0.002
           assert x['anti_leakage']['transset_access'] is False
           assert x['anti_leakage']['uavobb_training'] is False
-          print({'protocol_sha256':hashlib.sha256(b).hexdigest(),'gate':x['parity_gate']})
+          print({'protocol_sha256':hashlib.sha256(b).hexdigest(),'gate':x['parity_gate'],'correction':x['provenance_correction']})
           PY
       - name: Install exact Apache runtime and ONNX transport stack
         run: |
@@ -63,7 +65,8 @@ jobs:
           mkdir -p /tmp/assetgraph17b
           curl -L --fail --retry 3 -o /tmp/assetgraph17b/rtmdet_tiny.pth https://download.openmmlab.com/mmrotate/v1.0/rotated_rtmdet/rotated_rtmdet_tiny-3x-dota/rotated_rtmdet_tiny-3x-dota-9d821076.pth
           curl -L --fail --retry 3 -o /tmp/assetgraph17b/demo.jpg https://raw.githubusercontent.com/open-mmlab/mmrotate/3ff004eb21ea040455b5585db229edba4037f1bf/demo/demo.jpg
-          echo '081a74b2c84407347c7b62b45a8647c70a816452027aaf2e0d6cefae3a2b6e9d  /tmp/assetgraph17b/rtmdet_tiny.pth' | sha256sum -c -
+          echo '9d821076f9d3f9bbe5a709524e6b0cf907ad58a7fb92615321f351cd389e51a3  /tmp/assetgraph17b/rtmdet_tiny.pth' | sha256sum -c -
+          test "$(stat -c%s /tmp/assetgraph17b/rtmdet_tiny.pth)" = '48460132'
           test -s /tmp/assetgraph17b/demo.jpg
       - name: Export raw network and score PyTorch vs ONNX Runtime
         env:
