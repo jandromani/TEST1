@@ -1,0 +1,47 @@
+{
+  "schema": "assetgraph-runtime-registry/1.0",
+  "runtimes": [
+    {
+      "runtime_id": "ultralytics-uavobb-cycle16",
+      "family": "YOLO11n-OBB",
+      "backend": "pytorch+onnx",
+      "license": "REVIEW_REQUIRED_FOR_PRODUCT",
+      "product_status": "LAB_ONLY",
+      "evidence": "Cycle16/cycle16_recovery.json",
+      "metrics": {
+        "fine_f1": 0.7620967742,
+        "small_recall": 0.265625,
+        "other_vehicle_coarse_recall": 0.8571428571,
+        "coarse_vehicle_f1": 0.7923387097,
+        "pt_onnx_parity_f1": 1.0
+      },
+      "promotion": {
+        "accuracy_gate": false,
+        "runtime_parity_gate": true,
+        "license_gate": false,
+        "external_generalization_gate": false
+      },
+      "note": "Cycle 16 candidate was selected on UAV-OBB validation but internal promotion failed because small recall remained below 0.30. H01 remains sealed."
+    },
+    {
+      "runtime_id": "rtmdet-r-tiny-mmrotate-native",
+      "family": "RTMDet-R Tiny",
+      "backend": "MMRotate native CPU",
+      "license": "Apache-2.0",
+      "product_status": "PRODUCT_CANDIDATE_RUNTIME",
+      "source_commit": "3ff004eb21ea040455b5585db229edba4037f1bf",
+      "evidence": "Cycle17A/cycle17_apache_rtmdet_probe.json",
+      "promotion": {
+        "source_commit_gate": true,
+        "license_gate": true,
+        "dependency_import_gate": true,
+        "checkpoint_load_gate": true,
+        "native_inference_gate": true,
+        "onnx_parity_gate": false,
+        "assetgraph_adapter_gate": false,
+        "domain_accuracy_gate": false
+      },
+      "note": "Native Apache runtime probe passed. It is not a promoted production detector until ONNX parity, AssetGraph adapter and domain accuracy are proven."
+    }
+  ]
+}
