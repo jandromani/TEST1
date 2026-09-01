@@ -1,0 +1,84 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://assetgraph.local/schemas/identity-decision-object/v1",
+  "title": "AssetGraph Identity Decision Object v1",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "schema",
+    "decision_id",
+    "observation_id",
+    "decision",
+    "resolved_asset_id",
+    "confidence",
+    "top1_margin",
+    "candidates",
+    "reason_codes",
+    "counterevidence",
+    "evidence_refs",
+    "observation_fingerprint",
+    "policy_version",
+    "policy_calibration_ref",
+    "model_versions",
+    "created_at",
+    "decision_fingerprint"
+  ],
+  "properties": {
+    "schema": {"const": "assetgraph-identity-decision-object/v1"},
+    "decision_id": {"type": "string", "pattern": "^iddec_[a-f0-9]{20}$"},
+    "observation_id": {"type": "string", "minLength": 1},
+    "decision": {"enum": ["CONFIRMED", "CANDIDATE", "UNKNOWN", "NEW"]},
+    "resolved_asset_id": {"type": ["string", "null"]},
+    "confidence": {"type": "number", "minimum": 0, "maximum": 1},
+    "top1_margin": {"type": ["number", "null"]},
+    "candidates": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": ["asset_id", "class_name", "score", "components", "evidence_refs", "observation_count", "last_seen"],
+        "properties": {
+          "asset_id": {"type": "string"},
+          "class_name": {"type": "string"},
+          "score": {"type": "number", "minimum": 0, "maximum": 1},
+          "components": {
+            "type": "object",
+            "additionalProperties": false,
+            "required": ["appearance", "secondary", "geometry", "context"],
+            "properties": {
+              "appearance": {"type": ["number", "null"], "minimum": 0, "maximum": 1},
+              "secondary": {"type": ["number", "null"], "minimum": 0, "maximum": 1},
+              "geometry": {"type": ["number", "null"], "minimum": 0, "maximum": 1},
+              "context": {"type": ["number", "null"], "minimum": 0, "maximum": 1}
+            }
+          },
+          "evidence_refs": {"type": "array", "items": {"type": "string"}},
+          "observation_count": {"type": "integer", "minimum": 0},
+          "last_seen": {"type": ["string", "null"]}
+        }
+      }
+    },
+    "reason_codes": {"type": "array", "items": {"type": "string"}},
+    "counterevidence": {"type": "array", "items": {"type": "string"}},
+    "evidence_refs": {"type": "array", "items": {"type": "string"}},
+    "observation_fingerprint": {"type": "string", "pattern": "^[a-f0-9]{64}$"},
+    "policy_version": {"type": "string"},
+    "policy_calibration_ref": {"type": "string"},
+    "model_versions": {
+      "type": "object",
+      "additionalProperties": {"type": ["string", "null"]}
+    },
+    "created_at": {"type": "string"},
+    "decision_fingerprint": {"type": "string", "pattern": "^[a-f0-9]{64}$"}
+  },
+  "allOf": [
+    {
+      "if": {"properties": {"decision": {"const": "CONFIRMED"}}},
+      "then": {"properties": {"resolved_asset_id": {"type": "string", "minLength": 1}}}
+    },
+    {
+      "if": {"properties": {"decision": {"enum": ["CANDIDATE", "UNKNOWN", "NEW"]}}},
+      "then": {"properties": {"resolved_asset_id": {"type": "null"}}}
+    }
+  ]
+}
