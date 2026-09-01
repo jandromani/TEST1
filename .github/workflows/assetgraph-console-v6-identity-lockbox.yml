@@ -1,0 +1,102 @@
+name: AssetGraph Console v6 Identity Lockbox
+
+on:
+  push:
+    branches:
+      - assetgraph-cycle18b-frozen-intake
+    paths:
+      - '.assetgraph-lab/build_intelligence_console_v6_identity_lockbox.py'
+      - '.github/workflows/assetgraph-console-v6-identity-lockbox.yml'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  build-identity-lockbox:
+    runs-on: ubuntu-22.04
+    timeout-minutes: 85
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.10'
+      - name: Syntax gate
+        run: python -m py_compile .assetgraph-lab/build_intelligence_console_v6_identity_lockbox.py
+      - name: Install system dependencies
+        run: |
+          sudo apt-get update -y
+          sudo apt-get install -y ffmpeg
+      - name: Install Python envelope
+        run: |
+          python -m pip install --upgrade 'pip<26' wheel setuptools
+          printf 'numpy==1.26.4\nopencv-python-headless==4.10.0.84\n' >/tmp/v6-constraints.txt
+          pip install -c /tmp/v6-constraints.txt numpy==1.26.4 opencv-python-headless==4.10.0.84 pillow scipy requests remotezip huggingface_hub==0.26.5 lapx>=0.5.2
+          pip install -c /tmp/v6-constraints.txt torch==2.0.1 torchvision==0.15.2 --index-url https://download.pytorch.org/whl/cpu
+          pip install -c /tmp/v6-constraints.txt ultralytics==8.3.40
+          pip install -c /tmp/v6-constraints.txt mmengine==0.10.7 mmdet==3.2.0
+          pip install -c /tmp/v6-constraints.txt mmcv==2.1.0 -f https://download.openmmlab.com/mmcv/dist/cpu/torch2.0/index.html
+      - name: Checkout exact Apache MMRotate source
+        run: |
+          git clone --filter=blob:none https://github.com/open-mmlab/mmrotate.git /tmp/mmrotate-v6
+          git -C /tmp/mmrotate-v6 checkout --detach 3ff004eb21ea040455b5585db229edba4037f1bf
+          test "$(git -C /tmp/mmrotate-v6 rev-parse HEAD)" = '3ff004eb21ea040455b5585db229edba4037f1bf'
+          grep -q 'Apache License' /tmp/mmrotate-v6/LICENSE
+          pip install -c /tmp/v6-constraints.txt -v -e /tmp/mmrotate-v6
+      - name: Acquire exact RTMDet-R checkpoint
+        run: |
+          mkdir -p /tmp/assetgraph-v6
+          curl -L --fail --retry 3 -o /tmp/assetgraph-v6/rtmdet_tiny.pth https://download.openmmlab.com/mmrotate/v1.0/rotated_rtmdet/rotated_rtmdet_tiny-3x-dota/rotated_rtmdet_tiny-3x-dota-9d821076.pth
+          echo '9d821076f9d3f9bbe5a709524e6b0cf907ad58a7fb92615321f351cd389e51a3  /tmp/assetgraph-v6/rtmdet_tiny.pth' | sha256sum -c -
+      - name: Checkout exact DINOv2 source
+        run: |
+          git clone --filter=blob:none https://github.com/facebookresearch/dinov2.git /tmp/dinov2-v6
+          git -C /tmp/dinov2-v6 checkout --detach 7764ea0f912e53c92e82eb78a2a1631e92725fc8
+          test "$(git -C /tmp/dinov2-v6 rev-parse HEAD)" = '7764ea0f912e53c92e82eb78a2a1631e92725fc8'
+          grep -q 'Apache License' /tmp/dinov2-v6/LICENSE
+      - name: Build C19.1 lockbox
+        env:
+          MMROTATE_DIR: /tmp/mmrotate-v6
+          RTMDET_CKPT: /tmp/assetgraph-v6/rtmdet_tiny.pth
+          DINOV2_DIR: /tmp/dinov2-v6
+          XFORMERS_DISABLED: '1'
+        run: python .assetgraph-lab/build_intelligence_console_v6_identity_lockbox.py
+      - name: Validate C19.1 contract
+        run: |
+          test -s dist/ASSETGRAPH_INTELLIGENCE_CONSOLE_v6_IDENTITY_LOCKBOX.html
+          test -s dist/assetgraph_console_v6_manifest.json
+          python - <<'PY'
+          import json,re,subprocess,tempfile
+          from pathlib import Path
+          p=Path('dist/ASSETGRAPH_INTELLIGENCE_CONSOLE_v6_IDENTITY_LOCKBOX.html')
+          s=p.read_text(encoding='utf-8')
+          m=json.loads(Path('dist/assetgraph_console_v6_manifest.json').read_text())
+          c=m['v6']; l=c['lockbox']; g=c['promotion_gate']
+          assert 'IDENTITY LOCKBOX' in s
+          assert c['leakage_controls']['engine_selected_without_M07'] is True
+          assert c['leakage_controls']['thresholds_calibrated_without_M07'] is True
+          assert c['leakage_controls']['M07_GT_not_used_for_ranking'] is True
+          assert len(l['shared_gt_targets']) >= 3
+          assert len(l['absent_gt_targets']) >= 1
+          assert len(l['new_gt_targets']) >= 1
+          assert l['metrics']['present_queries'] > 0 and l['metrics']['absent_queries'] > 0
+          assert c['dino']['weight_sha256']
+          assert g['product_frozen'] is False
+          assert 'expanded multi-window/multi-video' in g['next_required']
+          scripts=re.findall(r'<script[^>]*>(.*?)</script>',s,re.S)
+          with tempfile.NamedTemporaryFile('w',suffix='.js',delete=False,encoding='utf-8') as f:
+              f.write('\n'.join(scripts)); js=f.name
+          subprocess.run(['node','--check',js],check=True)
+          print({'bytes':p.stat().st_size,'selected':c['selected_engine'],'lockbox':l['metrics'],'baseline':c['baseline_lockbox']['metrics'],'absent':l['absent_gt_targets'],'new':l['new_gt_targets'],'promotion':g,'js':'PASS'})
+          PY
+      - name: Upload v6 artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: assetgraph-intelligence-console-v6-identity-lockbox
+          path: |
+            dist/ASSETGRAPH_INTELLIGENCE_CONSOLE_v6_IDENTITY_LOCKBOX.html
+            dist/assetgraph_console_v6_manifest.json
+          if-no-files-found: error
+          retention-days: 30
