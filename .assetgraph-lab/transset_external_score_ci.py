@@ -1,5 +1,5 @@
 from __future__ import annotations
-import json, pathlib, hashlib, io, time, math, collections
+import json, pathlib, hashlib, io, time
 import requests
 from remotezip import RemoteZip
 from PIL import Image
@@ -35,10 +35,11 @@ def iou(a,b):
     x1=max(a[0],b[0]);y1=max(a[1],b[1]);x2=min(a[2],b[2]);y2=min(a[3],b[3]); inter=max(0,x2-x1)*max(0,y2-y1)
     aa=max(0,a[2]-a[0])*max(0,a[3]-a[1]);bb=max(0,b[2]-b[0])*max(0,b[3]-b[1]);return inter/(aa+bb-inter) if aa+bb-inter>0 else 0
 
-def merge(P,thr=.50):
+def merge_exact_cycle14(P,thr=.50):
+    """Replicate Cycle 14 tile merge exactly: class-aware suppression before coarse external scoring."""
     keep=[]
     for p in sorted(P,key=lambda x:x['conf'],reverse=True):
-        if any(iou(p['aabb'],q['aabb'])>=thr for q in keep):continue
+        if any(p['cls']==q['cls'] and iou(p['aabb'],q['aabb'])>=thr for q in keep):continue
         keep.append(p)
     return keep
 
@@ -51,7 +52,7 @@ def predict(im,profile,conf=.30):
     rs=MODEL.predict(crops,conf=conf,imgsz=profile['imgsz'],batch=min(8,len(crops)),device='cpu',verbose=False)
     P=[]
     for r,(x,y) in zip(rs,offs):P.extend(pred_result(r,x,y))
-    return merge(P)
+    return merge_exact_cycle14(P)
 
 def greedy(gt,pred,thr=.30):
     cand=[]
@@ -82,6 +83,6 @@ def main():
             per.append({'image_member':item['image_member'],'gt':len(gt),'pred':len(P),'tp':len(pairs),'fn':len(gt)-len(pairs),'fp':len(P)-len(pairs),'mean_iou':sum(x[2] for x in pairs)/len(pairs) if pairs else None})
     p=totals['tp']/totals['pred'] if totals['pred'] else 0;r=totals['tp']/totals['gt'] if totals['gt'] else 0;f1=2*p*r/(p+r) if p+r else 0;cre=abs(totals['pred']-totals['gt'])/totals['gt'] if totals['gt'] else 0
     rule=gate['pass_rule']; gates={'precision_pass':p>=rule['precision_min'],'recall_pass':r>=rule['recall_min'],'f1_pass':f1>=rule['f1_min'],'aggregate_count_relative_error_pass':cre<=rule['aggregate_count_relative_error_max'],'input_hashes_pass':bool(exact_hash)};gates['external_generalization_pass']=all(gates.values())
-    report={'schema':'assetgraph-evidence/transset-external-score-v1','dataset':{'name':'TRANSSET','article_id':ARTICLE,'license':'CC BY 4.0','zip_size':zf['size']},'lockbox':{'selected_count':lock['selected_count'],'selection':lock['selection'],'gt_boxes':totals['gt'],'lockbox_sha256':sha256_file(LOCK)},'model':{'checkpoint_sha256':sha256_file(PT),'source':'Cycle 11','cycle14_profile':profile,'confidence':conf,'cycle14_evidence_sha256':sha256_file(C14)},'anti_leakage':gate['anti_leakage'],'metrics':{'precision':p,'recall':r,'f1':f1,'tp':totals['tp'],'fp':totals['pred']-totals['tp'],'fn':totals['gt']-totals['tp'],'gt':totals['gt'],'pred':totals['pred'],'aggregate_count_relative_error':cre},'gates':gates,'per_image':per,'elapsed_seconds':time.time()-t}
+    report={'schema':'assetgraph-evidence/transset-external-score-v1','dataset':{'name':'TRANSSET','article_id':ARTICLE,'license':'CC BY 4.0','zip_size':zf['size']},'lockbox':{'selected_count':lock['selected_count'],'selection':lock['selection'],'gt_boxes':totals['gt'],'lockbox_sha256':sha256_file(LOCK)},'model':{'checkpoint_sha256':sha256_file(PT),'source':'Cycle 11','cycle14_profile':profile,'confidence':conf,'cycle14_evidence_sha256':sha256_file(C14),'tile_merge':'exact Cycle14 class-aware NMS, then coarse class-agnostic scoring'},'anti_leakage':gate['anti_leakage'],'metrics':{'precision':p,'recall':r,'f1':f1,'tp':totals['tp'],'fp':totals['pred']-totals['tp'],'fn':totals['gt']-totals['tp'],'gt':totals['gt'],'pred':totals['pred'],'aggregate_count_relative_error':cre},'gates':gates,'per_image':per,'elapsed_seconds':time.time()-t}
     (OUT/'transset_external_score.json').write_text(json.dumps(report,indent=2));print(json.dumps({'profile':profile,'metrics':report['metrics'],'gates':gates},indent=2))
 if __name__=='__main__':main()
