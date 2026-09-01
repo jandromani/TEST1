@@ -8,7 +8,7 @@ on:
 jobs:
   benchmark:
     runs-on: ubuntu-latest
-    timeout-minutes: 70
+    timeout-minutes: 90
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-python@v5
@@ -17,14 +17,17 @@ jobs:
       - name: Install benchmark dependencies
         run: |
           python -m pip install --upgrade pip
-          pip install 'ultralytics>=8.3,<9' opencv-python-headless scipy numpy pillow
+          pip install 'ultralytics>=8.3,<9' opencv-python-headless scipy numpy pillow remotezip huggingface_hub
       - name: Run Selective Memory v4
         continue-on-error: true
         run: python .assetgraph-lab/memory_v4_selective_ci.py
       - name: Run UAV-OBB training factory
         continue-on-error: true
         run: python .assetgraph-lab/uav_obb_train_ci.py
-      - name: Probe SeaDronesSee native MOT
+      - name: Run SeaDronesSee partial-archive MOT E2E
+        continue-on-error: true
+        run: python .assetgraph-lab/seadronessee_mot_e2e_ci.py
+      - name: Probe SeaDronesSee native MOT metadata
         continue-on-error: true
         run: python .assetgraph-lab/seadronessee_mot_probe_ci.py
       - name: Write Cycle 07 summary
@@ -37,7 +40,7 @@ jobs:
             try:
               d=json.loads(p.read_text())
               summary[p.name]={
-                'pass_rule': d.get('pass_rule', d.get('technical_pass_rule',{}).get('passed', d.get('result',{}).get('pass_rule'))),
+                'pass_rule': d.get('pass_rule', d.get('technical_pass_rule',{}).get('passed', d.get('blind_tracking_test',{}).get('technical_component_pass', d.get('result',{}).get('pass_rule')))),
                 'schema': d.get('schema')
               }
             except Exception as e: summary[p.name]={'error':str(e)}
@@ -47,6 +50,6 @@ jobs:
         if: always()
         uses: actions/upload-artifact@v4
         with:
-          name: assetgraph-cycle07-evidence
+          name: assetgraph-cycle07-evidence-r2
           path: .assetgraph-lab/evidence
           if-no-files-found: warn
