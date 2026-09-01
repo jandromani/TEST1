@@ -48,6 +48,7 @@ jobs:
           path: |
             assetgraph-core/dist/*
             assetgraph-core/registries/*.json
+            assetgraph-core/evidence/*.json
             assetgraph-core/schemas/*
             assetgraph-core/api/*
             assetgraph-core/README.md

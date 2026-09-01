@@ -42,6 +42,40 @@
         "domain_accuracy_gate": false
       },
       "note": "Native Apache runtime probe passed. It is not a promoted production detector until ONNX parity, AssetGraph adapter and domain accuracy are proven."
+    },
+    {
+      "runtime_id": "rtmdet-r-tiny-apache-onnx-c17c",
+      "family": "RTMDet-R Tiny",
+      "backend": "ONNX Runtime CPU + shared rotated decoder/NMS",
+      "license": "Apache-2.0",
+      "weights_status": "DOTA_EVALUATION_ONLY_NOT_PRODUCT_WEIGHTS",
+      "product_status": "TRANSPORT_VALIDATED_DOMAIN_UNVALIDATED",
+      "source_commit": "3ff004eb21ea040455b5585db229edba4037f1bf",
+      "onnx_sha256": "5336b5a5a54bfcdfca4e0dde3dc3710498da7f5885de18237c40c7f405808699",
+      "evidence": [
+        "Cycle17B/cycle17b_apache_raw_onnx_parity.json",
+        "Cycle17C/cycle17c_apache_final_detection_parity.json"
+      ],
+      "metrics": {
+        "final_detection_count": 201,
+        "matched_precision": 1.0,
+        "matched_recall": 1.0,
+        "min_rotated_iou": 0.9999894117359766,
+        "max_center_abs_delta_px": 0.00006103515625,
+        "max_size_abs_delta_px": 0.000141143798828125,
+        "max_angle_abs_delta_rad": 0.0000010728836059570312
+      },
+      "promotion": {
+        "source_commit_gate": true,
+        "license_gate": true,
+        "raw_onnx_parity_gate": true,
+        "final_detection_parity_gate": true,
+        "repeatability_gate": true,
+        "domain_accuracy_gate": false,
+        "product_weights_gate": false,
+        "dynamic_shape_gate": false
+      },
+      "note": "Transport through final decoder and rotated NMS is proven on one fixed 1024x1024 DOTA reference image. This is not a product detector or a domain-generalization claim."
     }
   ]
 }

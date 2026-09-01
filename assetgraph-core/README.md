@@ -40,13 +40,17 @@ Experimental Cycle code stays in the lab. A capability may enter this tree only 
 - TRANSSET H00 zero-shot external generalization: FAIL and consumed diagnostic.
 - Cycle 16 small/rare recovery: improved internal capability but promotion FAIL because small recall 0.266 < 0.30.
 - Apache RTMDet-R native runtime probe: PASS.
+- Apache RTMDet-R raw PyTorch -> ONNX Runtime parity: PASS on all nine tensors.
+- Apache RTMDet-R final detection parity through one shared decoder and rotated NMS: PASS, 201/201 matched with minimum rotated IoU 0.999989.
+
+The Apache path is now **transport validated**, not accuracy promoted. The official DOTA checkpoint remains evaluation-only; product weights, multidomain accuracy, dynamic shapes and tiled inference are still open gates.
 
 ## Next product gates
 
-1. Apache RTMDet-R -> ONNX parity.
-2. Multi-domain lawful training without touching external H01.
-3. Persistent identity service and temporal state engine.
-4. Event engine + DecisionObject compiler.
-5. API/CLI + workers + storage.
-6. Docker distribution and demo missions.
-7. Enterprise IAM/tenancy/observability.
+1. Freeze the Cycle 18 lawful multi-domain intake and training protocol without touching external H01.
+2. Train product-candidate Apache RTMDet-R weights and pass internal multidomain gates.
+3. Open H01 once only after that internal promotion pass.
+4. Replace the MMRotate-backed shared postprocess with a lightweight independently tested production implementation.
+5. Persistent identity service, temporal/event engine and measured Intelligence Memory.
+6. API/workers, operational UI, replay/provenance unification and durable evidence release.
+7. Enterprise IAM, tenancy, observability and security gates.

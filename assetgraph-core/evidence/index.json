@@ -1,0 +1,53 @@
+{
+  "schema": "assetgraph-evidence-index/1.0",
+  "repository": "jandromani/TEST1",
+  "entries": [
+    {
+      "cycle": "16",
+      "status": "INTERNAL_PROMOTION_FAIL",
+      "workflow_run_id": 33496949151,
+      "head_sha": "8508a17c456a69c4c6b51f8db46d010ad332f428",
+      "artifact_id": 9796773584,
+      "artifact_name": "assetgraph-cycle16-small-rare-recovery",
+      "artifact_sha256": "82d19f7653c0db5586b8b9524a009e8a1ff560a6f93cb87e321eb11ea49603a2",
+      "artifact_expires_at": "2026-11-30T10:20:55Z",
+      "claim": "general capability improved, but small recall 0.265625 remained below the frozen 0.30 gate; TRANSSET-H01 stayed sealed"
+    },
+    {
+      "cycle": "17A",
+      "status": "PASS",
+      "workflow_run_id": 33497978643,
+      "head_sha": "8253d78a11eda7d746695692bef10dddff0a615e",
+      "artifact_id": 9796538568,
+      "artifact_name": "assetgraph-cycle17a-apache-rtmdet-runtime-probe",
+      "artifact_sha256": "b0960b284de31f6a462e24a72a84414b5f2f06399ee872e2b1bb2d62d981da48",
+      "artifact_expires_at": "2026-11-30T10:32:57Z",
+      "claim": "exact Apache-2.0 MMRotate source and official RTMDet-R Tiny checkpoint load and run native CPU inference"
+    },
+    {
+      "cycle": "17B",
+      "status": "PASS",
+      "workflow_run_id": 33500503780,
+      "head_sha": "d6d57a26292792d52426ee076dfd12433f109404",
+      "artifact_id": 9797532671,
+      "artifact_name": "assetgraph-cycle17b-apache-raw-onnx",
+      "artifact_sha256": "2f1e46334ab7300be3dfdb8ab2441b75f3ce45332ba5e07eb9c0aba67cef6ef6",
+      "artifact_expires_at": "2026-11-30T11:03:14Z",
+      "onnx_sha256": "5336b5a5a54bfcdfca4e0dde3dc3710498da7f5885de18237c40c7f405808699",
+      "claim": "all nine raw tensors pass the frozen native-to-ONNX parity gate"
+    },
+    {
+      "cycle": "17C",
+      "status": "PASS_AFTER_MEASUREMENT_REPAIR",
+      "workflow_run_id": 33505436045,
+      "head_sha": "a79035b4ab9770cad74ec8f1d468e5a94e15c935",
+      "artifact_id": 9799430292,
+      "artifact_name": "assetgraph-cycle17c-apache-final-detections",
+      "artifact_sha256": "afbea5c685146def9ccbfe973d82b4fe200fee46ba674369897fde2032fb67f4",
+      "artifact_expires_at": "2026-11-30T12:01:10Z",
+      "claim": "201 of 201 final canonical detections match after one shared decoder and rotated NMS; minimum rotated IoU 0.9999894117359766",
+      "measurement_note": "the first greedy global matcher was non-bijective in dense same-class clusters; model, ONNX, input, postprocess, NMS and frozen thresholds were unchanged"
+    }
+  ],
+  "durability_gap": "GitHub Actions artifacts are retention-bound. Copy exact digest-verified artifacts into the first durable release before expiry."
+}

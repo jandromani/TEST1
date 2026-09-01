@@ -48,6 +48,27 @@
       "state": "FALSIFIED",
       "scope": "DUT mission-memory experiments through v4",
       "evidence": ["REQ-008"]
+    },
+    {
+      "id": "CAP-APACHE-ONNX-TRANSPORT-001",
+      "name": "Apache RTMDet-R native to ONNX final-detection transport parity",
+      "state": "PROVEN_COMPONENT",
+      "scope": "official MMRotate DOTA demo image, fixed batch=1 1024x1024, ONNX Runtime CPU, shared decoder and rotated NMS",
+      "metrics": {
+        "matched": 201,
+        "precision": 1.0,
+        "recall": 1.0,
+        "min_rotated_iou": 0.9999894117359766
+      },
+      "evidence": [
+        "Cycle17B/cycle17b_apache_raw_onnx_parity.json",
+        "Cycle17C/cycle17c_apache_final_detection_parity.json"
+      ],
+      "limitations": [
+        "DOTA checkpoint is not promoted as product weights",
+        "domain accuracy is unscored",
+        "dynamic shapes and tiled inference are unproven"
+      ]
     }
   ]
 }
