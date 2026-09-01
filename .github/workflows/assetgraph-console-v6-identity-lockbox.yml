@@ -74,7 +74,7 @@ jobs:
           s=p.read_text(encoding='utf-8')
           m=json.loads(Path('dist/assetgraph_console_v6_manifest.json').read_text())
           c=m['v6']; l=c['lockbox']; g=c['promotion_gate']
-          assert 'IDENTITY LOCKBOX' in s
+          assert 'OPEN-SET PERSISTENT IDENTITY' in s and 'LOCKBOX' in s
           assert c['leakage_controls']['engine_selected_without_M07'] is True
           assert c['leakage_controls']['thresholds_calibrated_without_M07'] is True
           assert c['leakage_controls']['M07_GT_not_used_for_ranking'] is True
