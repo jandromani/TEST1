@@ -1,0 +1,90 @@
+{
+  "schema": "assetgraph-perception-registry/frozen-acquisition-sources-v1",
+  "cycle": "18B",
+  "observed_at": "2026-09-01",
+  "sources": [
+    {
+      "id": "uav-obb-mendeley-v1",
+      "track": "urban RGB OBB vehicles",
+      "authoritative_source": "Mendeley Data",
+      "dataset_id": "6snrjwcpkh",
+      "version": 1,
+      "doi": "10.17632/6snrjwcpkh.1",
+      "landing_uri": "https://data.mendeley.com/datasets/6snrjwcpkh/1",
+      "acquisition_uris": [
+        "https://api.data.mendeley.com/datasets/6snrjwcpkh/zip/file_downloaded?version=1",
+        "https://api.mendeley.com/datasets/6snrjwcpkh/zip/file_downloaded?version=1"
+      ],
+      "license_expected": "CC-BY-4.0",
+      "attribution_required": true,
+      "declared": {
+        "images": 1375,
+        "instances": 35615,
+        "splits": {"train": 1158, "valid": 207, "test": 10},
+        "resolution": "1920x1080",
+        "classes": ["bike", "bus", "car", "other_vehicle", "taxi", "truck"]
+      },
+      "state": "READY_FOR_BYTE_FREEZE"
+    },
+    {
+      "id": "hit-uav-main-6692596",
+      "track": "thermal UAV OBB/AABB",
+      "authoritative_source": "HIT-UAV GitHub release plus pinned repository provenance",
+      "annotation_commit": "669259659b21a2737ca9f5e4bc81892acbe6ecd8",
+      "annotation_commit_license": "CC-BY-4.0",
+      "payload_release": {
+        "tag": "v1.2.1",
+        "release_id": 92134997,
+        "asset_id": 95304186,
+        "name": "HIT-UAV.zip",
+        "size_bytes_from_github_metadata": 812468971,
+        "uri": "https://github.com/suojiashun/HIT-UAV-Infrared-Thermal-Dataset/releases/download/v1.2.1/HIT-UAV.zip",
+        "release_license_expected": "CC0-1.0"
+      },
+      "snapshot_reconciliation": {
+        "required": true,
+        "reason": "the C18A pinned annotation commit carries CC-BY-4.0 while release v1.2.1 carries CC0; the acquired release must be treated as its own immutable payload and its bundled annotations must not be silently mixed with another snapshot",
+        "acceptance": "archive must contain its own license evidence and internally coherent image/annotation payload; any cross-snapshot merge requires explicit member equivalence evidence"
+      },
+      "declared": {
+        "images": 2898,
+        "source_video_frames": 43470,
+        "classes": ["Person", "Bicycle", "Car", "OtherVehicle"]
+      },
+      "state": "READY_FOR_BYTE_FREEZE_WITH_SNAPSHOT_RECONCILIATION"
+    },
+    {
+      "id": "seadronessee-main-8062b5d",
+      "track": "maritime RGB Object Detection v2",
+      "authoritative_source": "University of Tuebingen SeaDronesSee benchmark",
+      "repository_commit": "8062b5df484bfeab7ebb8c039ca535dee05b6d8e",
+      "landing_uri": "https://seadronessee.cs.uni-tuebingen.de/dataset",
+      "license_expected": "CC0-1.0",
+      "declared": {
+        "train_images": 8930,
+        "validation_images": 1547,
+        "test_images": 3750,
+        "mot_clips": 22,
+        "mot_frames": 54105
+      },
+      "known_historical_share": {
+        "uri": "https://cloud.cs.uni-tuebingen.de/index.php/s/aJQPHLGnke68M52",
+        "authoritative_for_od_v2": false,
+        "reason_not_selected": "recent papers point to this University of Tuebingen share for the historical SeaDronesSee object-detection corpus, whose published size differs from Object Detection v2; C18B will not silently substitute it for OD v2"
+      },
+      "third_party_reference_only": {
+        "uri": "https://huggingface.co/datasets/dronefreak/SeaDronesSee",
+        "claimed_variant": "official CompressedVersion reformatted",
+        "authoritative": false,
+        "allowed_use": "post-freeze byte/count comparison only"
+      },
+      "state": "BLOCKED_PENDING_EXACT_OFFICIAL_ODV2_ASSET_PIN"
+    },
+    {
+      "id": "au-air-2019-license-conflict",
+      "state": "QUARANTINED_NO_DOWNLOAD",
+      "license": "CONFLICTING",
+      "reason": "public CC-BY claim conflicts with embedded noncommercial license entries in the pinned annotation evidence"
+    }
+  ]
+}

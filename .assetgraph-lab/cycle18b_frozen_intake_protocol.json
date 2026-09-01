@@ -1,0 +1,71 @@
+{
+  "schema": "assetgraph-perception-protocol/frozen-multidomain-intake-v1",
+  "cycle": "18B",
+  "parent_cycle": "18A",
+  "parent_commit": "206c33355c8d29f0a35c91b134df1c1ddd158308",
+  "goal": "freeze exact bytes, provenance, member manifests, split boundaries, annotations and rights evidence for the commercially eligible multidomain perception corpus before any training job can exist",
+  "hard_boundary": {
+    "training_allowed": false,
+    "model_selection_allowed": false,
+    "external_test_scoring_allowed": false,
+    "TRANSSET-H01": "SEALED",
+    "TRANSSET-UAVOBB": "SEALED",
+    "au_air_download_allowed": false
+  },
+  "approved_candidate_ids": [
+    "uav-obb-mendeley-v1",
+    "hit-uav-main-6692596",
+    "seadronessee-main-8062b5d"
+  ],
+  "quarantined_candidate_ids": [
+    "au-air-2019-license-conflict"
+  ],
+  "required_freeze_evidence": [
+    "exact acquisition URI and immutable version identity",
+    "archive SHA-256 and byte count",
+    "member manifest with member SHA-256",
+    "archive path-safety audit",
+    "declared split validation",
+    "exact-content cross-split leakage audit",
+    "annotation structure and class-map validation",
+    "license artifact bound to the acquired payload",
+    "attribution or citation record",
+    "sensitive-imagery/privacy preflight"
+  ],
+  "dataset_rules": {
+    "uav-obb-mendeley-v1": {
+      "must_remain_version": 1,
+      "expected_split_images": {"train": 1158, "valid": 207, "test": 10},
+      "annotation": "YOLOv8-OBB: class + 4 normalized xy vertices",
+      "canonical_classes": ["bicycle", "heavy_vehicle", "light_vehicle", "other_vehicle"]
+    },
+    "hit-uav-main-6692596": {
+      "pinned_annotation_commit": "669259659b21a2737ca9f5e4bc81892acbe6ecd8",
+      "payload_release_candidate": "v1.2.1",
+      "payload_release_must_be_audited_as_its_own_artifact": true,
+      "do_not_mix_annotations_across_snapshots_without_member_equivalence": true,
+      "expected_images": 2898,
+      "annotation": "oriented and axis-aligned JSON/XML",
+      "thermal_channel_policy": "single-channel thermal is replicated to 3 channels only at transform time; original bytes remain untouched"
+    },
+    "seadronessee-main-8062b5d": {
+      "required_track": "Object Detection v2",
+      "preferred_variant": "official CompressedVersion",
+      "expected_split_images": {"train": 8930, "validation": 1547},
+      "mirror_policy": "third-party redistributions may be used only for byte comparison after an official source is frozen; never as the authoritative training source"
+    }
+  },
+  "completion_gate": {
+    "all_approved_candidates_frozen": true,
+    "all_required_freeze_evidence_present": true,
+    "all_rights_checks_pass": true,
+    "no_cross_split_exact_duplicates": true,
+    "all_annotation_checks_pass": true,
+    "all_expected_counts_match": true,
+    "quarantined_candidates_absent": true,
+    "external_gates_still_sealed": true,
+    "all_required": true
+  },
+  "partial_progress_policy": "Individual datasets may be frozen independently and reported as PASS while Cycle 18B remains IN_PROGRESS. A green workflow proves the guardrails executed; it does not itself authorize training.",
+  "next_if_complete": "Cycle 18C builds a frozen multidomain training corpus and trains RTMDet-R from the Apache-compatible stack without touching either sealed external gate; only after model selection is frozen may H01 be opened once."
+}

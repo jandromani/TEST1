@@ -1,0 +1,85 @@
+name: AssetGraph Cycle 18B Frozen Multidomain Intake
+
+on:
+  push:
+    branches: [assetgraph-cycle18b-frozen-intake]
+    paths:
+      - '.assetgraph-lab/cycle18b_frozen_intake_protocol.json'
+      - '.assetgraph-lab/cycle18b_sources.json'
+      - '.assetgraph-lab/cycle18b_contract_gate.py'
+      - '.assetgraph-lab/cycle18b_freeze_dataset.py'
+      - '.github/workflows/assetgraph-cycle18b-frozen-intake.yml'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  contract:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 5
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+      - name: Enforce Cycle 18B frozen-intake contract
+        run: python .assetgraph-lab/cycle18b_contract_gate.py
+      - uses: actions/upload-artifact@v4
+        with:
+          name: assetgraph-cycle18b-contract
+          path: .assetgraph-lab/evidence/cycle18b/contract_gate.json
+
+  byte-freeze:
+    needs: contract
+    strategy:
+      fail-fast: false
+      matrix:
+        dataset:
+          - uav-obb-mendeley-v1
+          - hit-uav-main-6692596
+    runs-on: ubuntu-24.04
+    timeout-minutes: 45
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+      - name: Freeze exact source bytes and member manifest
+        run: python .assetgraph-lab/cycle18b_freeze_dataset.py '${{ matrix.dataset }}'
+      - name: Assert training remains impossible in Cycle 18B
+        run: |
+          python - <<'PY'
+          import json, pathlib
+          dataset = '${{ matrix.dataset }}'
+          p = pathlib.Path('.assetgraph-lab/evidence/cycle18b') / f'{dataset}.json'
+          x = json.load(open(p))
+          assert x['training_allowed'] is False
+          assert x['external_gates_accessed'] is False
+          assert x['gates']['byte_freeze_pass'] is True
+          print({
+              'dataset': dataset,
+              'archive_sha256': x['download']['sha256'],
+              'archive_bytes': x['download']['bytes'],
+              'member_manifest_sha256': x['member_manifest_sha256'],
+              'member_count': x['audit']['member_count'],
+              'image_count': x['audit']['image_count'],
+              'gates': x['gates'],
+          })
+          PY
+      - uses: actions/upload-artifact@v4
+        with:
+          name: assetgraph-cycle18b-${{ matrix.dataset }}
+          path: .assetgraph-lab/evidence/cycle18b/${{ matrix.dataset }}.json
+
+  boundary-summary:
+    if: always()
+    needs: [contract, byte-freeze]
+    runs-on: ubuntu-24.04
+    steps:
+      - name: Preserve the scientific boundary
+        run: |
+          echo 'Cycle 18B is an intake/freeze cycle, not a training cycle.'
+          echo 'SeaDronesSee OD v2 remains blocked until the exact official asset is pinned.'
+          echo 'TRANSSET-H01 and TRANSSET-UAVOBB remain SEALED.'
+          echo 'No model selection or external score is authorized by this workflow.'
