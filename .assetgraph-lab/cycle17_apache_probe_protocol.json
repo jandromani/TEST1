@@ -15,6 +15,7 @@
   "environment": {
     "python": "3.10",
     "numpy": "1.26.4",
+    "opencv_python": "4.10.0.84",
     "torch": "2.0.1+cpu",
     "torchvision": "0.15.2+cpu",
     "mmcv": "2.1.0",
@@ -24,7 +25,7 @@
   },
   "compatibility_fix": {
     "trigger": "first probe reached native inference but NumPy 2.2.6 was ABI-incompatible with the Torch 2.0.1/MMCV compiled stack",
-    "change": "pin NumPy to 1.26.4",
+    "change": "constrain NumPy to 1.26.4 for every install and pin OpenCV 4.10.0.84 inside the same NumPy-1-compatible envelope",
     "model_changed": false,
     "checkpoint_changed": false,
     "input_image_changed": false,
