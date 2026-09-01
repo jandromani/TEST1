@@ -1,0 +1,101 @@
+name: AssetGraph Console v5 Identity Arena
+
+on:
+  push:
+    branches:
+      - assetgraph-cycle18b-frozen-intake
+    paths:
+      - '.assetgraph-lab/build_intelligence_console_v5_identity_arena.py'
+      - '.github/workflows/assetgraph-console-v5-identity-arena.yml'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  build-identity-arena:
+    runs-on: ubuntu-22.04
+    timeout-minutes: 85
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.10'
+      - name: Syntax gate
+        run: python -m py_compile .assetgraph-lab/build_intelligence_console_v5_identity_arena.py
+      - name: Install system dependencies
+        run: |
+          sudo apt-get update -y
+          sudo apt-get install -y ffmpeg
+      - name: Install Python envelope
+        run: |
+          python -m pip install --upgrade 'pip<26' wheel setuptools
+          printf 'numpy==1.26.4\nopencv-python-headless==4.10.0.84\n' >/tmp/v5-constraints.txt
+          pip install -c /tmp/v5-constraints.txt numpy==1.26.4 opencv-python-headless==4.10.0.84 pillow scipy requests remotezip huggingface_hub==0.26.5 lapx>=0.5.2
+          pip install -c /tmp/v5-constraints.txt torch==2.0.1 torchvision==0.15.2 --index-url https://download.pytorch.org/whl/cpu
+          pip install -c /tmp/v5-constraints.txt ultralytics==8.3.40
+          pip install -c /tmp/v5-constraints.txt mmengine==0.10.7 mmdet==3.2.0
+          pip install -c /tmp/v5-constraints.txt mmcv==2.1.0 -f https://download.openmmlab.com/mmcv/dist/cpu/torch2.0/index.html
+      - name: Checkout exact Apache MMRotate source
+        run: |
+          git clone --filter=blob:none https://github.com/open-mmlab/mmrotate.git /tmp/mmrotate-v5
+          git -C /tmp/mmrotate-v5 checkout --detach 3ff004eb21ea040455b5585db229edba4037f1bf
+          test "$(git -C /tmp/mmrotate-v5 rev-parse HEAD)" = '3ff004eb21ea040455b5585db229edba4037f1bf'
+          grep -q 'Apache License' /tmp/mmrotate-v5/LICENSE
+          pip install -c /tmp/v5-constraints.txt -v -e /tmp/mmrotate-v5
+      - name: Acquire exact RTMDet-R checkpoint
+        run: |
+          mkdir -p /tmp/assetgraph-v5
+          curl -L --fail --retry 3 -o /tmp/assetgraph-v5/rtmdet_tiny.pth https://download.openmmlab.com/mmrotate/v1.0/rotated_rtmdet/rotated_rtmdet_tiny-3x-dota/rotated_rtmdet_tiny-3x-dota-9d821076.pth
+          echo '9d821076f9d3f9bbe5a709524e6b0cf907ad58a7fb92615321f351cd389e51a3  /tmp/assetgraph-v5/rtmdet_tiny.pth' | sha256sum -c -
+      - name: Checkout exact DINOv2 product-candidate source
+        run: |
+          git clone --filter=blob:none https://github.com/facebookresearch/dinov2.git /tmp/dinov2-v5
+          git -C /tmp/dinov2-v5 checkout --detach 7764ea0f912e53c92e82eb78a2a1631e92725fc8
+          test "$(git -C /tmp/dinov2-v5 rev-parse HEAD)" = '7764ea0f912e53c92e82eb78a2a1631e92725fc8'
+          grep -q 'Apache License' /tmp/dinov2-v5/LICENSE
+      - name: Build C19 identity arena
+        env:
+          MMROTATE_DIR: /tmp/mmrotate-v5
+          RTMDET_CKPT: /tmp/assetgraph-v5/rtmdet_tiny.pth
+          DINOV2_DIR: /tmp/dinov2-v5
+          XFORMERS_DISABLED: '1'
+        run: python .assetgraph-lab/build_intelligence_console_v5_identity_arena.py
+      - name: Validate C19 contract
+        run: |
+          test -s dist/ASSETGRAPH_INTELLIGENCE_CONSOLE_v5_IDENTITY_ARENA.html
+          test -s dist/assetgraph_console_v5_manifest.json
+          python - <<'PY'
+          import json,re,subprocess,tempfile
+          from pathlib import Path
+          p=Path('dist/ASSETGRAPH_INTELLIGENCE_CONSOLE_v5_IDENTITY_ARENA.html')
+          s=p.read_text(encoding='utf-8')
+          m=json.loads(Path('dist/assetgraph_console_v5_manifest.json').read_text())
+          a=m['v5']
+          assert 'IDENTITY ARENA' in s
+          assert 'CONFIRMED' in s and 'CANDIDATE' in s and 'UNKNOWN' in s
+          assert a['ranking_leakage']['gt_used_for_m07_ranking'] is False
+          assert a['ranking_leakage']['m07_gt_used_only_after_ranking'] is True
+          assert a['shared_target_count'] >= 3
+          assert a['m07_candidate_units'] > 0
+          assert a['dino']['repo_commit'] == '7764ea0f912e53c92e82eb78a2a1631e92725fc8'
+          assert a['dino']['weight_sha256']
+          assert {'HANDCRAFTED_V4','DINOV2_SMALL','DINOV2_GEOMETRY','DINOV2_CONTEXT','FUSION'} <= set(a['engines'])
+          assert all(x['metrics']['queries'] > 0 for x in a['engines'].values())
+          scripts=re.findall(r'<script[^>]*>(.*?)</script>',s,re.S)
+          with tempfile.NamedTemporaryFile('w',suffix='.js',delete=False,encoding='utf-8') as f:
+              f.write('\n'.join(scripts)); js=f.name
+          subprocess.run(['node','--check',js],check=True)
+          print({'bytes':p.stat().st_size,'best_engine':a['best_engine'],'promotion':a['promotion_gate'],'shared_targets':a['shared_gt_targets'],'metrics':{k:v['metrics'] for k,v in a['engines'].items()},'js':'PASS'})
+          PY
+      - name: Upload v5 artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: assetgraph-intelligence-console-v5-identity-arena
+          path: |
+            dist/ASSETGRAPH_INTELLIGENCE_CONSOLE_v5_IDENTITY_ARENA.html
+            dist/assetgraph_console_v5_manifest.json
+          if-no-files-found: error
+          retention-days: 30
