@@ -38,6 +38,16 @@ jobs:
       - name: Build buyer-ready showcase
         run: python .assetgraph-lab/build_intelligence_console_v3_showcase.py
 
+      - name: Normalize generated copy
+        run: |
+          python - <<'PY'
+          from pathlib import Path
+          p=Path('dist/ASSETGRAPH_INTELLIGENCE_CONSOLE_v3_SHOWCASE.html')
+          s=p.read_text(encoding='utf-8')
+          s=s.replace('8 frames extracted from official HIT-UAV','12 frames extracted from official HIT-UAV')
+          p.write_text(s,encoding='utf-8')
+          PY
+
       - name: Validate v3 contract
         run: |
           test -s dist/ASSETGRAPH_INTELLIGENCE_CONSOLE_v3_SHOWCASE.html
@@ -54,12 +64,27 @@ jobs:
           assert 'WHAT YOU BUY' in s
           assert 'Same GT identity' in s
           assert 'VERIFIED_COORDINATE_TRANSFORM' in s
+          assert '8 frames extracted from official HIT-UAV' not in s
           assert s.count('data:image/jpeg;base64,') >= 80
           assert m['showcase']['coordinate_alignment_fix']
           a=m['seadronessee']['selected_windows']['identity_early']
           b=m['seadronessee']['selected_windows']['identity_late']
           assert b['start']-a['start'] >= 120
-          print({'bytes':p.stat().st_size,'embedded_jpegs':s.count('data:image/jpeg;base64,'),'identity_gap':b['start']-a['start']})
+          dm=re.search(r'const DATA=(\{.*?\});\s*let missionIndex',s,re.S)
+          assert dm, 'DATA payload not found'
+          data=json.loads(dm.group(1))
+          violations=[]
+          total_boxes=0
+          for mission in data['missions']:
+              assert len(mission['frames']) == 12, (mission['id'],len(mission['frames']))
+              for f in mission['frames']:
+                  for box in f.get('boxes',[]):
+                      total_boxes += 1
+                      x1,y1,x2,y2=box['xyxy']
+                      if x1 < -1 or y1 < -1 or x2 > f['width']+1 or y2 > f['height']+1 or x2 < x1 or y2 < y1:
+                          violations.append((mission['id'],f['frame_id'],box.get('track_id')))
+          assert not violations, violations[:10]
+          print({'bytes':p.stat().st_size,'embedded_jpegs':s.count('data:image/jpeg;base64,'),'identity_gap':b['start']-a['start'],'boxes':total_boxes,'bounds_violations':len(violations)})
           PY
 
       - name: Upload v3 showcase artifact
