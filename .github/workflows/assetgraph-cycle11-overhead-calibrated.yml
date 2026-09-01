@@ -1,0 +1,30 @@
+name: AssetGraph Cycle 11 Overhead Calibrated
+
+on:
+  push:
+    branches: [assetgraph-cycle11-overhead-calibrated]
+  workflow_dispatch:
+
+jobs:
+  calibrated-train:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 35
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+      - name: Install training dependencies
+        run: pip install 'ultralytics>=8.3,<9' pyyaml requests
+      - name: Run full-coverage calibrated UAV-OBB training gate
+        continue-on-error: true
+        run: python .assetgraph-lab/uavobb_calibrated_train_ci.py
+      - name: Upload Cycle 11 evidence
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: assetgraph-cycle11-overhead-calibrated
+          path: |
+            .assetgraph-lab/evidence/uavobb_calibrated_training.json
+            .assetgraph-lab/evidence/uavobb_calibrated_best.pt
+          if-no-files-found: warn
