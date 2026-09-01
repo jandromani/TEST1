@@ -1,0 +1,33 @@
+name: AssetGraph Cycle 15B TRANSSET Map
+on:
+  push:
+    branches: [assetgraph-cycle15-transset-intake]
+  workflow_dispatch:
+permissions:
+  contents: read
+jobs:
+  map:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with: {python-version: '3.11'}
+      - run: pip install requests remotezip
+      - name: Map TRANSSET remote ZIP without model access
+        run: python .assetgraph-lab/transset_zip_map_ci.py
+      - name: Verify unopened lockbox
+        run: |
+          python - <<'PY'
+          import json
+          x=json.load(open('.assetgraph-lab/evidence/transset_remote_map.json'))
+          assert x['schema']=='assetgraph-evidence/transset-remote-map-v1'
+          assert x['lockbox_policy']['training_allowed_before_first_score'] is False
+          assert x['lockbox_policy']['selection_must_use_structure_only'] is True
+          assert x['map_pass']
+          print({'members':x['member_count'],'extensions':x['extensions'],'top':x['top_level']})
+          PY
+      - uses: actions/upload-artifact@v4
+        with:
+          name: assetgraph-cycle15b-transset-map
+          path: .assetgraph-lab/evidence/transset_remote_map.json
