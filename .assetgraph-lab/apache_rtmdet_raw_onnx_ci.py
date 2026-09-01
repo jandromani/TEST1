@@ -2,7 +2,6 @@ from __future__ import annotations
 
 import hashlib
 import json
-import math
 import os
 import pathlib
 import platform
@@ -23,7 +22,7 @@ CKPT = pathlib.Path(os.environ["RTMDET_CKPT"]).resolve()
 IMG = pathlib.Path(os.environ["RTMDET_IMAGE"]).resolve()
 ONNX_PATH = OUT / "rtmdet_r_tiny_raw_1024.onnx"
 EXPECTED_COMMIT = "3ff004eb21ea040455b5585db229edba4037f1bf"
-EXPECTED_CKPT_SHA = "081a74b2c84407347c7b62b45a8647c70a816452027aaf2e0d6cefae3a2b6e9d"
+EXPECTED_CKPT_SHA = "9d821076f9d3f9bbe5a709524e6b0cf907ad58a7fb92615321f351cd389e51a3"
 
 
 def sha256(path: pathlib.Path) -> str:
@@ -182,35 +181,36 @@ def main() -> None:
         "schema": "assetgraph-evidence/apache-raw-onnx-parity-v1",
         "cycle": "17B",
         "protocol_sha256": sha256(PROTOCOL),
+        "provenance_correction": protocol.get("provenance_correction"),
         "source": {
             "repository": "open-mmlab/mmrotate",
             "commit": source_commit,
-            "license_detected": "Apache-2.0",
+            "license_detected": "Apache-2.0"
         },
         "model": {
             "name": protocol["model"]["name"],
             "checkpoint_sha256": sha256(CKPT),
-            "checkpoint_bytes": CKPT.stat().st_size,
+            "checkpoint_bytes": CKPT.stat().st_size
         },
         "input": {
             "image": IMG.name,
             "image_sha256": sha256(IMG),
             "network_input_shape": list(input_np.shape),
-            "network_input_sha256": hashlib.sha256(input_np.tobytes()).hexdigest(),
+            "network_input_sha256": hashlib.sha256(input_np.tobytes()).hexdigest()
         },
         "onnx": {
             "path": ONNX_PATH.name,
             "sha256": sha256(ONNX_PATH),
             "bytes": ONNX_PATH.stat().st_size,
             "opset": protocol["export"]["opset"],
-            "output_count": len(output_names),
+            "output_count": len(output_names)
         },
         "parity": {
             "cosine_min": cosine_min,
             "mean_abs_diff_worst": mean_max,
             "p99_abs_diff_worst": p99_max,
             "max_abs_diff_worst": abs_max,
-            "per_output": per_output,
+            "per_output": per_output
         },
         "gates": gates,
         "environment": {
@@ -224,13 +224,13 @@ def main() -> None:
             "mmengine": mmengine.__version__,
             "mmrotate": mmrotate.__version__,
             "onnx": onnx.__version__,
-            "onnxruntime": ort.__version__,
+            "onnxruntime": ort.__version__
         },
         "postprocess_included": False,
         "nms_included": False,
         "transset_accessed": False,
         "uavobb_training_performed": False,
-        "elapsed_seconds": time.time() - started,
+        "elapsed_seconds": time.time() - started
     }
     evidence_path = OUT / "cycle17b_apache_raw_onnx_parity.json"
     evidence_path.write_text(json.dumps(report, indent=2))
@@ -240,7 +240,7 @@ def main() -> None:
         "cosine_min": cosine_min,
         "p99_abs_diff_worst": p99_max,
         "max_abs_diff_worst": abs_max,
-        "gates": gates,
+        "gates": gates
     }, indent=2))
 
     if not gates["raw_onnx_parity_pass"]:
