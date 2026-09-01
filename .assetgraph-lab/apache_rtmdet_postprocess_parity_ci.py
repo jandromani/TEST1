@@ -74,17 +74,88 @@ def angle_delta(a: float, b: float) -> float:
     return abs((a - b + math.pi / 2) % math.pi - math.pi / 2)
 
 
+def _signed_polygon_area(polygon: Sequence[tuple[float, float]]) -> float:
+    if len(polygon) < 3:
+        return 0.0
+    return 0.5 * sum(
+        polygon[i][0] * polygon[(i + 1) % len(polygon)][1]
+        - polygon[(i + 1) % len(polygon)][0] * polygon[i][1]
+        for i in range(len(polygon))
+    )
+
+
+def _box_corners(geometry: dict[str, Any]) -> list[tuple[float, float]]:
+    cx, cy = float(geometry["cx"]), float(geometry["cy"])
+    width, height = float(geometry["width"]), float(geometry["height"])
+    angle = float(geometry["angle_rad"])
+    cosine, sine = math.cos(angle), math.sin(angle)
+    return [
+        (cx + x * cosine - y * sine, cy + x * sine + y * cosine)
+        for x, y in (
+            (-width / 2, -height / 2),
+            (width / 2, -height / 2),
+            (width / 2, height / 2),
+            (-width / 2, height / 2),
+        )
+    ]
+
+
+def _edge_cross(a: tuple[float, float], b: tuple[float, float], point: tuple[float, float]) -> float:
+    return (b[0] - a[0]) * (point[1] - a[1]) - (b[1] - a[1]) * (point[0] - a[0])
+
+
+def _line_intersection(
+    p1: tuple[float, float],
+    p2: tuple[float, float],
+    q1: tuple[float, float],
+    q2: tuple[float, float],
+) -> tuple[float, float]:
+    x1, y1 = p1
+    x2, y2 = p2
+    x3, y3 = q1
+    x4, y4 = q2
+    denominator = (x1 - x2) * (y3 - y4) - (y1 - y2) * (x3 - x4)
+    if abs(denominator) < 1e-15:
+        return p2
+    factor = ((x1 - x3) * (y3 - y4) - (y1 - y3) * (x3 - x4)) / denominator
+    return x1 + factor * (x2 - x1), y1 + factor * (y2 - y1)
+
+
+def _convex_intersection(
+    subject: Sequence[tuple[float, float]],
+    clipper: Sequence[tuple[float, float]],
+) -> list[tuple[float, float]]:
+    output = list(subject)
+    orientation = 1.0 if _signed_polygon_area(clipper) >= 0 else -1.0
+    for index, edge_start in enumerate(clipper):
+        edge_end = clipper[(index + 1) % len(clipper)]
+        input_polygon, output = output, []
+        if not input_polygon:
+            break
+        previous = input_polygon[-1]
+        previous_inside = _edge_cross(edge_start, edge_end, previous) * orientation >= -1e-12
+        for current in input_polygon:
+            current_inside = _edge_cross(edge_start, edge_end, current) * orientation >= -1e-12
+            if current_inside:
+                if not previous_inside:
+                    output.append(_line_intersection(previous, current, edge_start, edge_end))
+                output.append(current)
+            elif previous_inside:
+                output.append(_line_intersection(previous, current, edge_start, edge_end))
+            previous, previous_inside = current, current_inside
+    return output
+
+
+def rotated_iou_float64(left: dict[str, Any], right: dict[str, Any]) -> float:
+    left_polygon, right_polygon = _box_corners(left), _box_corners(right)
+    left_area = abs(_signed_polygon_area(left_polygon))
+    right_area = abs(_signed_polygon_area(right_polygon))
+    intersection_area = abs(_signed_polygon_area(_convex_intersection(left_polygon, right_polygon)))
+    union = left_area + right_area - intersection_area
+    return intersection_area / union if union > 0 else 0.0
+
+
 def match_detections(pt_rows: list[dict[str, Any]], ort_rows: list[dict[str, Any]], iou_floor: float) -> dict[str, Any]:
-    import torch
-    from mmcv.ops import box_iou_rotated
-
-    def boxes(items: list[dict[str, Any]]):
-        return torch.tensor([[
-            row["geometry"]["cx"], row["geometry"]["cy"],
-            row["geometry"]["width"], row["geometry"]["height"],
-            row["geometry"]["angle_rad"],
-        ] for row in items], dtype=torch.float32)
-
     if not pt_rows or not ort_rows:
         matched = 0
         return {
@@ -99,25 +170,17 @@ def match_detections(pt_rows: list[dict[str, Any]], ort_rows: list[dict[str, Any
             "pairs": [],
         }
 
-    ious = box_iou_rotated(boxes(pt_rows), boxes(ort_rows)).detach().cpu().numpy()
-    for i, left in enumerate(pt_rows):
-        for j, right in enumerate(ort_rows):
-            if left["asset_class"] != right["asset_class"]:
-                ious[i, j] = -1.0
-
-    work = ious.copy()
     pairs = []
-    while work.size:
-        flat = int(np.argmax(work))
-        i, j = np.unravel_index(flat, work.shape)
-        iou = float(work[i, j])
+    for i, (left, right) in enumerate(zip(pt_rows, ort_rows)):
+        if left["asset_class"] != right["asset_class"]:
+            continue
+        iou = rotated_iou_float64(left["geometry"], right["geometry"])
         if iou < iou_floor:
-            break
-        left, right = pt_rows[i], ort_rows[j]
+            continue
         lg, rg = left["geometry"], right["geometry"]
         pairs.append({
             "pt_index": int(i),
-            "onnx_index": int(j),
+            "onnx_index": int(i),
             "asset_class": left["asset_class"],
             "rotated_iou": iou,
             "score_abs_diff": abs(float(left["confidence"]) - float(right["confidence"])),
@@ -125,9 +188,6 @@ def match_detections(pt_rows: list[dict[str, Any]], ort_rows: list[dict[str, Any
             "size_abs_delta_px": max(abs(float(lg["width"]) - float(rg["width"])), abs(float(lg["height"]) - float(rg["height"]))),
             "angle_abs_delta_rad": angle_delta(float(lg["angle_rad"]), float(rg["angle_rad"])),
         })
-        work[i, :] = -1.0
-        work[:, j] = -1.0
-
     def maximum(key: str) -> float:
         return max((float(pair[key]) for pair in pairs), default=0.0)
 
@@ -228,6 +288,7 @@ def main() -> None:
         "transport": {"source_cycle": "17B", "onnx_sha256": sha256(ONNX_PATH), "output_names": output_names},
         "input": {"image": IMG.name, "image_sha256": sha256(IMG), "network_input_sha256": hashlib.sha256(input_np.tobytes()).hexdigest()},
         "adapter": protocol["shared_adapter"],
+        "measurement_repair": protocol.get("measurement_repair"),
         "final_detections": {
             "pytorch_count": len(pt_rows),
             "onnx_count": len(ort_rows),

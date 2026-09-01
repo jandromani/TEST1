@@ -32,6 +32,10 @@ jobs:
           assert x['model']['c17b_onnx_sha256_expected']=='5336b5a5a54bfcdfca4e0dde3dc3710498da7f5885de18237c40c7f405808699'
           assert x['parity_gate']['matched_precision_min']==1.0
           assert x['parity_gate']['matched_recall_min']==1.0
+          assert x['parity_gate']['matched_rotated_iou_min']==0.999
+          assert x['measurement_repair']['gate_thresholds_changed'] is False
+          assert x['measurement_repair']['model_changed'] is False
+          assert x['measurement_repair']['postprocess_changed'] is False
           assert x['anti_leakage']['transset_access'] is False
           assert x['anti_leakage']['uavobb_access'] is False
           print({'protocol_sha256':hashlib.sha256(b).hexdigest(),'gate':x['parity_gate']})

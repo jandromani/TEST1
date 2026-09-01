@@ -115,12 +115,12 @@ class RTMDetRSharedPostprocessAdapter:
                 },
             ))
         records.sort(key=lambda row: (
-            -row.confidence,
             row.asset_class,
             row.geometry["cx"],
             row.geometry["cy"],
             row.geometry["width"],
             row.geometry["height"],
             row.geometry["angle_rad"],
+            -row.confidence,
         ))
         return records

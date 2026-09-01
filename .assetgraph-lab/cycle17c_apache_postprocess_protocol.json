@@ -31,6 +31,16 @@
     },
     "canonical_geometry": "oriented_box/cx_cy_width_height_angle_rad/le90"
   },
+  "measurement_repair": {
+    "trigger": "the first frozen run produced identical final counts and per-class counts with parameter deltas below 0.00015, but greedy global IoU matching was non-bijective in dense same-class clusters and left 27 of 201 detections unmatched",
+    "correction": "sort canonically by class and geometry, pair the already count-locked records bijectively, and compute rotated IoU with an independent float64 convex-polygon implementation",
+    "model_changed": false,
+    "onnx_changed": false,
+    "input_changed": false,
+    "postprocess_changed": false,
+    "nms_changed": false,
+    "gate_thresholds_changed": false
+  },
   "parity_gate": {
     "final_detection_count_exact": true,
     "per_class_count_exact": true,
