@@ -28,7 +28,7 @@ jobs:
       - name: Install repair dependencies
         run: pip install 'ultralytics>=8.3,<9' pyyaml requests onnx onnxruntime
       - name: Run tiled + hierarchy + shared-postprocess repair
-        run: python .assetgraph-lab/uavobb_deployment_repair_ci.py
+        run: python .assetgraph-lab/uavobb_deployment_repair_fixed_ci.py
       - name: Validate evidence contract
         run: |
           python - <<'PY'
@@ -41,6 +41,7 @@ jobs:
           assert x['schema']=='assetgraph-evidence/uavobb-deployment-repair-v1'
           assert y['schema']=='assetgraph-decision-object/0.2'
           assert x['training_in_cycle14'] is False
+          assert x['methodology_fix'].startswith('non-regression')
           assert 'deployment_repair_pass' in x['gates']
           assert h.exists() and 'Cycle 14' in h.read_text()
           print({'gates':x['gates'],'selected':x['selected_profile'],'parity_f1':x['shared_postprocess_parity']['f1'],'html_bytes':h.stat().st_size})
