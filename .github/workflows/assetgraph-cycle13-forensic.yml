@@ -1,0 +1,51 @@
+name: AssetGraph Cycle 13 Failure Forensics
+
+on:
+  push:
+    branches: [assetgraph-cycle13-forensic]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+  actions: read
+
+jobs:
+  forensic:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 35
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+      - name: Download exact Cycle 11 checkpoint
+        uses: actions/download-artifact@v4
+        with:
+          name: assetgraph-cycle11-overhead-calibrated
+          path: .assetgraph-lab/evidence/c11
+          github-token: ${{ github.token }}
+          run-id: 33485780370
+      - name: Install forensic dependencies
+        run: pip install 'ultralytics>=8.3,<9' pyyaml requests onnx onnxruntime
+      - name: Run class-scale-ONNX forensic
+        run: python .assetgraph-lab/uavobb_forensic_ci.py
+      - name: Static check forensic HTML and JSON
+        run: |
+          python - <<'PY'
+          from pathlib import Path
+          import json
+          e=Path('.assetgraph-lab/evidence/uavobb_forensic.json')
+          h=Path('.assetgraph-lab/dist/assetgraph_frontier_v15_failure_forensics.html')
+          x=json.loads(e.read_text())
+          assert x['schema']=='assetgraph-evidence/uavobb-forensic-v1'
+          s=h.read_text(); assert 'Cycle 13' in s
+          print({'diagnosis':x['diagnosis'],'html_bytes':h.stat().st_size,'embedded_jpegs':s.count('data:image/jpeg;base64,')})
+          PY
+      - name: Upload Cycle 13 forensic evidence
+        uses: actions/upload-artifact@v4
+        with:
+          name: assetgraph-cycle13-forensic
+          path: |
+            .assetgraph-lab/evidence/uavobb_forensic.json
+            .assetgraph-lab/evidence/uavobb_forensic.onnx
+            .assetgraph-lab/dist/assetgraph_frontier_v15_failure_forensics.html
