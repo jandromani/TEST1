@@ -1,0 +1,30 @@
+{
+  "schema": "assetgraph-external-generalization-gate/1.0",
+  "dataset": "TRANSSET",
+  "lockbox": {
+    "selection": "128 filenames selected by SHA256(filename) before image/GT/model access",
+    "images": 128,
+    "post_freeze_gt_boxes": 555
+  },
+  "evaluation_semantics": {
+    "target": "vehicle",
+    "fine_subtypes_scored": false,
+    "reason": "UAV-OBB and TRANSSET fine taxonomies are not label-equivalent.",
+    "match_iou": 0.30,
+    "prediction_profile": "exact profile selected by Cycle 14 on UAV-OBB validation only",
+    "checkpoint": "exact Cycle 11 checkpoint; no TRANSSET training or calibration before first score"
+  },
+  "pass_rule": {
+    "precision_min": 0.50,
+    "recall_min": 0.50,
+    "f1_min": 0.50,
+    "aggregate_count_relative_error_max": 0.25,
+    "all_required": true
+  },
+  "anti_leakage": {
+    "transset_used_for_training": false,
+    "transset_used_for_threshold_selection": false,
+    "transset_used_for_profile_selection": false,
+    "gate_defined_before_first_inference": true
+  }
+}
