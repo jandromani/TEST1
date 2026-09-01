@@ -1,0 +1,59 @@
+name: AssetGraph Cycle 12B Promotion Audit Fixed
+
+on:
+  push:
+    branches: [assetgraph-cycle12b-promotion-audit-fixed]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+  actions: read
+
+jobs:
+  promotion-audit-fixed:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 25
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+      - name: Download exact Cycle 11 checkpoint
+        uses: actions/download-artifact@v4
+        with:
+          name: assetgraph-cycle11-overhead-calibrated
+          path: .assetgraph-lab/evidence/c11
+          github-token: ${{ github.token }}
+          run-id: 33485780370
+      - name: Install audit dependencies
+        run: pip install 'ultralytics>=8.3,<9' pyyaml requests onnx onnxruntime
+      - name: Run repaired frozen promotion audit
+        continue-on-error: true
+        run: python .assetgraph-lab/uavobb_promotion_audit_fixed_ci.py
+      - name: Static check generated evidence
+        if: always()
+        run: |
+          python - <<'PY'
+          from pathlib import Path
+          import json
+          e=Path('.assetgraph-lab/evidence/uavobb_promotion_audit.json')
+          h=Path('.assetgraph-lab/dist/assetgraph_frontier_v14_overhead_decision_object.html')
+          if e.exists():
+              x=json.loads(e.read_text()); print({'gate':x['gate'],'schema':x['schema']})
+          else: print('evidence missing')
+          if h.exists():
+              s=h.read_text(); assert 'data:image/jpeg;base64,' in s and 'DecisionObject' in s
+              print({'html_bytes':h.stat().st_size,'embedded_jpegs':s.count('data:image/jpeg;base64,')})
+          else: print('html missing')
+          PY
+      - name: Upload Cycle 12B evidence
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: assetgraph-cycle12b-promotion-audit-fixed
+          path: |
+            .assetgraph-lab/evidence/uavobb_promotion_audit.json
+            .assetgraph-lab/evidence/decision_object_uavobb.json
+            .assetgraph-lab/evidence/uavobb_calibrated_best.onnx
+            .assetgraph-lab/dist/assetgraph_frontier_v14_overhead_decision_object.html
+          if-no-files-found: warn
