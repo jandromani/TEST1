@@ -5,14 +5,15 @@ import numpy as np
 from PIL import Image
 
 ROOT=pathlib.Path(__file__).resolve().parent
+REPO=ROOT.parent
 V3=ROOT/'build_intelligence_console_v3_showcase.py'
 spec=importlib.util.spec_from_file_location('assetgraph_v3_for_v4',V3)
 mod=importlib.util.module_from_spec(spec); assert spec and spec.loader; spec.loader.exec_module(mod)
-HTML=ROOT/'dist'/'ASSETGRAPH_INTELLIGENCE_CONSOLE_v3_SHOWCASE.html'
-MAN=ROOT/'dist'/'assetgraph_console_v3_manifest.json'
-OUT=ROOT/'dist'/'ASSETGRAPH_INTELLIGENCE_CONSOLE_v4_MODEL_LAB.html'
-OUTMAN=ROOT/'dist'/'assetgraph_console_v4_manifest.json'
-WORK=ROOT/'.assetgraph-lab'/'assets'/'console_v4_model_lab'; WORK.mkdir(parents=True,exist_ok=True)
+HTML=REPO/'dist'/'ASSETGRAPH_INTELLIGENCE_CONSOLE_v3_SHOWCASE.html'
+MAN=REPO/'dist'/'assetgraph_console_v3_manifest.json'
+OUT=REPO/'dist'/'ASSETGRAPH_INTELLIGENCE_CONSOLE_v4_MODEL_LAB.html'
+OUTMAN=REPO/'dist'/'assetgraph_console_v4_manifest.json'
+WORK=ROOT/'assets'/'console_v4_model_lab'; WORK.mkdir(parents=True,exist_ok=True)
 
 
 def data_from_html(s):
