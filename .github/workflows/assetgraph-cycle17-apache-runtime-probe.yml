@@ -5,6 +5,8 @@ on:
     branches: [assetgraph-cycle17-apache-runtime-probe]
     paths:
       - '.github/workflows/assetgraph-cycle17-apache-runtime-probe.yml'
+      - '.assetgraph-lab/apache_rtmdet_probe_ci.py'
+      - '.assetgraph-lab/cycle17_apache_probe_protocol.json'
   workflow_dispatch:
 
 permissions:
@@ -26,22 +28,36 @@ jobs:
           p='.assetgraph-lab/cycle17_apache_probe_protocol.json';b=open(p,'rb').read();x=json.loads(b)
           assert x['candidate']['source_commit']=='3ff004eb21ea040455b5585db229edba4037f1bf'
           assert x['candidate']['license_expected']=='Apache-2.0'
+          assert x['environment']['numpy']=='1.26.4'
+          assert x['environment']['opencv_python']=='4.10.0.84'
+          assert x['compatibility_fix']['model_changed'] is False
+          assert x['compatibility_fix']['gate_changed'] is False
           assert 'no TRANSSET access' in x['non_goals']
-          print({'protocol_sha256':hashlib.sha256(b).hexdigest(),'candidate':x['candidate']})
+          print({'protocol_sha256':hashlib.sha256(b).hexdigest(),'candidate':x['candidate'],'compatibility_fix':x['compatibility_fix']})
           PY
       - name: Install pinned CPU foundation
         run: |
+          printf 'numpy==1.26.4\nopencv-python==4.10.0.84\n' > /tmp/c17-constraints.txt
           python -m pip install --upgrade 'pip<26' wheel setuptools
-          pip install torch==2.0.1 torchvision==0.15.2 --index-url https://download.pytorch.org/whl/cpu
-          pip install mmengine==0.10.7 mmdet==3.2.0
-          pip install mmcv==2.1.0 -f https://download.openmmlab.com/mmcv/dist/cpu/torch2.0/index.html
+          pip install -c /tmp/c17-constraints.txt numpy==1.26.4 opencv-python==4.10.0.84
+          pip install -c /tmp/c17-constraints.txt torch==2.0.1 torchvision==0.15.2 --index-url https://download.pytorch.org/whl/cpu
+          pip install -c /tmp/c17-constraints.txt mmengine==0.10.7 mmdet==3.2.0
+          pip install -c /tmp/c17-constraints.txt mmcv==2.1.0 -f https://download.openmmlab.com/mmcv/dist/cpu/torch2.0/index.html
+          python - <<'PY'
+          import numpy, cv2
+          assert numpy.__version__=='1.26.4', numpy.__version__
+          assert cv2.__version__=='4.10.0', cv2.__version__
+          print({'numpy':numpy.__version__,'opencv':cv2.__version__})
+          PY
       - name: Checkout exact MMRotate source
         run: |
           git clone --filter=blob:none https://github.com/open-mmlab/mmrotate.git /tmp/mmrotate17
           git -C /tmp/mmrotate17 checkout --detach 3ff004eb21ea040455b5585db229edba4037f1bf
           test "$(git -C /tmp/mmrotate17 rev-parse HEAD)" = '3ff004eb21ea040455b5585db229edba4037f1bf'
           grep -q 'Apache License' /tmp/mmrotate17/LICENSE
-          pip install -v -e /tmp/mmrotate17
+          printf 'numpy==1.26.4\nopencv-python==4.10.0.84\n' > /tmp/c17-constraints.txt
+          pip install -c /tmp/c17-constraints.txt -v -e /tmp/mmrotate17
+          pip check
       - name: Acquire official RTMDet-R Tiny checkpoint and real demo image
         run: |
           mkdir -p /tmp/assetgraph17
@@ -64,6 +80,7 @@ jobs:
           assert x['schema']=='assetgraph-evidence/apache-rtmdet-runtime-probe-v1'
           assert x['source']['commit']=='3ff004eb21ea040455b5585db229edba4037f1bf'
           assert x['source']['license_detected']=='Apache-2.0'
+          assert x['environment']['numpy']=='1.26.4'
           assert x['transset_accessed'] is False
           assert x['uavobb_training_performed'] is False
           assert x['onnx_claim']=='NOT_TESTED'
